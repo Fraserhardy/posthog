@@ -43,8 +43,8 @@ from posthog.auth import (
     JwtAuthentication,
     OAuthAccessTokenAuthentication,
     PersonalAPIKeyAuthentication,
-    ProjectSecretAPIKeyAuthentication,
     SessionAuthentication,
+    TeamSecretTokenAuthentication,
 )
 from posthog.clickhouse.query_tagging import Feature, Product, tag_queries
 from posthog.constants import PRODUCT_TOUR_TARGETING_FLAG_PREFIX, SURVEY_TARGETING_FLAG_PREFIX, FlagRequestType
@@ -71,7 +71,7 @@ from posthog.models.person.point_in_time_properties import (
 )
 from posthog.models.property import Property
 from posthog.models.signals import model_activity_signal, mutable_receiver
-from posthog.permissions import ProjectSecretAPITokenPermission
+from posthog.permissions import TeamSecretTokenPermission
 from posthog.queries.base import determine_parsed_date_for_property_matching
 from posthog.rate_limit import BurstRateThrottle, ClickHouseBurstRateThrottle, ClickHouseSustainedRateThrottle
 from posthog.rbac.access_control_api_mixin import AccessControlViewSetMixin
@@ -302,7 +302,7 @@ LOCAL_EVALUATION_PERSONAL_API_KEY_SOURCE_COUNTER = Counter(
 )
 
 _AUTH_METHOD_BY_CLASS: dict[type, str] = {
-    ProjectSecretAPIKeyAuthentication: "secret_api_key",
+    TeamSecretTokenAuthentication: "secret_api_key",
     PersonalAPIKeyAuthentication: "personal_api_key",
     OAuthAccessTokenAuthentication: "oauth",
     JwtAuthentication: "jwt",
@@ -3444,9 +3444,9 @@ class FeatureFlagViewSet(
         throttle_classes=[LocalEvaluationThrottle],
         required_scopes=["feature_flag:read"],
         authentication_classes=[
-            ProjectSecretAPIKeyAuthentication,
+            TeamSecretTokenAuthentication,
         ],
-        permission_classes=[ProjectSecretAPITokenPermission],
+        permission_classes=[TeamSecretTokenPermission],
     )
     def local_evaluation(self, request: request.Request, **kwargs) -> Response:
         # **kwargs is required because DRF passes parent_lookup_project_id from nested router
@@ -3459,7 +3459,7 @@ class FeatureFlagViewSet(
         auth_header = request.headers.get("authorization", "")
         if (
             request.data.get("secret_api_key")
-            and isinstance(request.successful_authenticator, ProjectSecretAPIKeyAuthentication)
+            and isinstance(request.successful_authenticator, TeamSecretTokenAuthentication)
             and not re.match(r"^Bearer\s+phs_[a-zA-Z0-9]+$", auth_header)
         ):
             LOCAL_EVALUATION_SECRET_KEY_IN_BODY_COUNTER.inc()
@@ -4077,9 +4077,9 @@ class FeatureFlagViewSet(
         detail=True,
         required_scopes=["feature_flag:read"],
         authentication_classes=[
-            ProjectSecretAPIKeyAuthentication,
+            TeamSecretTokenAuthentication,
         ],
-        permission_classes=[ProjectSecretAPITokenPermission],
+        permission_classes=[TeamSecretTokenPermission],
         throttle_classes=[RemoteConfigThrottle],
     )
     def remote_config(self, request: request.Request, **kwargs):
