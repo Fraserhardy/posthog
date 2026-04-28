@@ -16,7 +16,7 @@ from django.core import mail
 from django.core.asgi import get_asgi_application
 from django.core.cache import cache
 from django.http import HttpResponse
-from django.test import RequestFactory, override_settings
+from django.test import RequestFactory, SimpleTestCase, override_settings
 from django.utils import timezone
 
 from asgiref.sync import sync_to_async
@@ -36,11 +36,13 @@ from two_factor.utils import totp_digits
 from posthog.api.authentication import password_reset_token_generator, post_login, social_login_notification
 from posthog.api.oauth.test_dcr import generate_rsa_key
 from posthog.auth import (
+    InternalAPIUser,
     OAuthAccessTokenAuthentication,
     ProjectSecretAPIKeyAuthentication,
     ProjectSecretAPIKeyUser,
     TeamSecretTokenAuthentication,
     TeamSecretTokenUser,
+    _extract_phs_token,
 )
 from posthog.helpers.user_devices import (
     KNOWN_DEVICE_COOKIE,
@@ -2045,6 +2047,84 @@ class TestTeamSecretTokenAuthentication(APIBaseTest):
         result = authenticator.authenticate(request)
 
         self.assertIsNone(result)
+
+
+class TestSyntheticUser(SimpleTestCase):
+    def _team(self, team_id=42):
+        return type("FakeTeam", (), {"id": team_id})()
+
+    def test_base_class_requires_distinct_id(self):
+        from posthog.synthetic_user import SyntheticUser
+
+        with self.assertRaises(TypeError):
+            SyntheticUser(self._team())  # type: ignore[call-arg]
+
+    def test_team_secret_token_user_distinct_id_includes_team_id(self):
+        user = TeamSecretTokenUser(self._team(team_id=42))
+        self.assertEqual(user.distinct_id, "team-secret-token-42")
+        self.assertEqual(user.current_team_id, 42)
+        self.assertTrue(user.is_authenticated)
+        self.assertIsNone(user.id)
+
+    def test_project_secret_api_key_user_carries_psak_and_distinct_id(self):
+        team = self._team(team_id=7)
+        fake_psak = type(
+            "FakePSAK",
+            (),
+            {"team": team, "team_id": team.id, "id": 99, "scopes": ["endpoint:read"]},
+        )()
+        user = ProjectSecretAPIKeyUser(fake_psak)
+        self.assertEqual(user.distinct_id, "psak-7-99")
+        self.assertIs(user.project_secret_api_key, fake_psak)
+        self.assertIsNone(user.id)
+
+    def test_isinstance_check_recognises_both_subclasses(self):
+        from posthog.synthetic_user import SyntheticUser
+
+        team = self._team()
+        fake_psak = type("FakePSAK", (), {"team": team, "team_id": team.id, "id": 1, "scopes": []})()
+        self.assertIsInstance(TeamSecretTokenUser(team), SyntheticUser)
+        self.assertIsInstance(ProjectSecretAPIKeyUser(fake_psak), SyntheticUser)
+
+
+class TestExtractPhsToken(SimpleTestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
+    @parameterized.expand(
+        [
+            ("list_body", "[1, 2, 3]"),
+            ("string_body", '"hello"'),
+            ("number_body", "42"),
+            ("null_body", "null"),
+        ]
+    )
+    def test_non_dict_body_returns_none(self, _name, raw_body):
+        wsgi_request = self.factory.post("/", data=raw_body, content_type="application/json")
+        request = Request(wsgi_request)
+        request.parsers = [JSONParser()]
+
+        self.assertIsNone(_extract_phs_token(request, auth_kind="team_secret_token"))
+
+    def test_valid_token_in_header_returned(self):
+        token = "phs_" + "x" * 35
+        wsgi_request = self.factory.get("/", HTTP_AUTHORIZATION=f"Bearer {token}")
+        self.assertEqual(_extract_phs_token(Request(wsgi_request), auth_kind="psak"), token)
+
+    def test_valid_token_in_dict_body_returned(self):
+        token = "phs_" + "y" * 35
+        wsgi_request = self.factory.post(
+            "/",
+            data=json.dumps({"secret_api_key": token}),
+            content_type="application/json",
+        )
+        request = Request(wsgi_request)
+        request.parsers = [JSONParser()]
+        self.assertEqual(_extract_phs_token(request, auth_kind="psak"), token)
+
+    def test_no_token_anywhere_returns_none(self):
+        wsgi_request = self.factory.get("/")
+        self.assertIsNone(_extract_phs_token(Request(wsgi_request), auth_kind="psak"))
 
 
 class TestProjectSecretAPIKeyAuthentication(APIBaseTest):

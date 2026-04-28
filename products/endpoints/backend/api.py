@@ -58,7 +58,7 @@ from posthog.api.services.query import process_query_model
 from posthog.api.shared import UserBasicSerializer
 from posthog.api.tagged_item import TaggedItemViewSetMixin, cleanup_orphan_tags, set_tags_on_object
 from posthog.api.utils import action
-from posthog.auth import ProjectSecretAPIKeyAuthentication
+from posthog.auth import ProjectSecretAPIKeyAuthentication, body_without_auth_fields
 from posthog.clickhouse.client.connection import Workload
 from posthog.clickhouse.client.limit import ConcurrencyLimitExceeded
 from posthog.clickhouse.query_tagging import Feature, Product, get_query_tag_value, tag_queries
@@ -393,9 +393,8 @@ class MaterializationPreviewRequestSerializer(serializers.Serializer):
 )
 @extend_schema(tags=[ProductKey.ENDPOINTS])
 class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, TaggedItemViewSetMixin, viewsets.ModelViewSet):
-    # Accept ProjectSecretAPIKey auth in addition to the default chain (session, personal API key, OAuth, JWT).
-    # TeamAndOrgViewSetMixin.get_authenticators prepends this, so PSAK is tried first.
     authentication_classes = [ProjectSecretAPIKeyAuthentication]
+    psak_allowed_actions = ["run"]
     # NOTE: Do we need to override the scopes for the "create"
     scope_object = "endpoint"
     # Special case for query - these are all essentially read actions
@@ -2208,7 +2207,7 @@ class EndpointViewSet(TeamAndOrgViewSetMixin, PydanticModelMixin, TaggedItemView
     def run(self, request: Request, name=None, *args, **kwargs) -> Response:
         """Execute endpoint with optional parameters."""
         endpoint = get_object_or_404(Endpoint, team=self.team, name=name, is_active=True, deleted=False)
-        data = self.get_model(request.data, EndpointRunRequest)
+        data = self.get_model(body_without_auth_fields(request), EndpointRunRequest)
 
         # Track endpoint execution for deprecation monitoring
         report_user_action(

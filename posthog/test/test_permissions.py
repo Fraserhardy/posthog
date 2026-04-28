@@ -5,7 +5,7 @@ from posthog.test.base import BaseTest
 from unittest.mock import Mock, patch
 
 from django.conf import settings
-from django.test import override_settings
+from django.test import SimpleTestCase, override_settings
 from django.utils import timezone
 
 from parameterized import parameterized
@@ -417,6 +417,67 @@ class TestTeamSecretTokenPermission(BaseTest):
 
         # None is not in the allowed endpoints tuple, so this should return False
         self.assertFalse(result)
+
+
+class TestProjectSecretAPIKeyAPIScopePermission(SimpleTestCase):
+    def setUp(self):
+        from posthog.permissions import APIScopePermission
+
+        self.permission = APIScopePermission()
+
+    def _make_psak_request(self, scopes=("endpoint:read",), team_id=1):
+        from posthog.auth import ProjectSecretAPIKeyAuthentication
+
+        request = Mock()
+        request.method = "POST"
+
+        authenticator = Mock(spec=ProjectSecretAPIKeyAuthentication)
+        psak = Mock()
+        psak.team_id = team_id
+        psak.scopes = list(scopes)
+        authenticator.project_secret_api_key = psak
+        request.successful_authenticator = authenticator
+        return request, psak
+
+    def test_default_deny_when_view_omits_psak_allowed_actions(self):
+        request, _ = self._make_psak_request()
+
+        view = Mock(spec=[])
+        view.action = "run"
+        view.scope_object = "endpoint"
+
+        self.assertFalse(self.permission.has_permission(request, view))
+        self.assertIn("does not support project secret API key", self.permission.message)
+
+    def test_team_check_attribute_error_denies(self):
+        from rest_framework.exceptions import PermissionDenied
+
+        request, _ = self._make_psak_request()
+
+        class NoTeamView:
+            @property
+            def team(self):
+                raise AttributeError("view has no team attribute")
+
+        with self.assertRaises(PermissionDenied) as ctx:
+            self.permission._check_project_secret_api_key_team(request, NoTeamView())
+
+        self.assertIn("only supported on project-based endpoints", str(ctx.exception.detail))
+
+    def test_team_check_key_error_denies(self):
+        from rest_framework.exceptions import PermissionDenied
+
+        request, _ = self._make_psak_request()
+
+        class NoTeamKwargView:
+            @property
+            def team(self):
+                raise KeyError("team_id")
+
+        with self.assertRaises(PermissionDenied) as ctx:
+            self.permission._check_project_secret_api_key_team(request, NoTeamKwargView())
+
+        self.assertIn("only supported on project-based endpoints", str(ctx.exception.detail))
 
 
 class TestTeamMemberAccessPermission(BaseTest):
