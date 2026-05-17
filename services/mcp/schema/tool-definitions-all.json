@@ -2637,21 +2637,6 @@
             "readOnlyHint": true
         }
     },
-    "feature-flags-my-flags-retrieve": {
-        "description": "List all feature flags in the current project along with their evaluated value for the authenticated user (the API key owner). Each item includes the flag definition and its current `value` (boolean for simple flags, variant key string for multivariate flags, false if disabled). Optionally pass `groups` as a JSON object to evaluate group-based flags.",
-        "category": "Feature flags",
-        "feature": "flags",
-        "summary": "Get my evaluated feature flags",
-        "title": "Get my evaluated feature flags",
-        "required_scopes": ["feature_flag:read"],
-        "new_mcp": true,
-        "annotations": {
-            "destructiveHint": false,
-            "idempotentHint": true,
-            "openWorldHint": true,
-            "readOnlyHint": true
-        }
-    },
     "feature-flags-status-retrieve": {
         "description": "Check the health and evaluation status of a feature flag by ID. Returns a status (active, stale, deleted, or unknown) and a human-readable reason explaining the status.",
         "category": "Feature flags",
@@ -5127,8 +5112,68 @@
             "readOnlyHint": true
         }
     },
-    "signals-scout-emit-signal": {
-        "description": "Fire `emit_signal` with `source_product = signals_scout`. The `finding_id` is baked into the deterministic `Signal.source_id = run:<id>:finding:<id>` for traceability, but this is NOT idempotent — a second call with the same `finding_id` emits a second signal, so emit each finding exactly once and never retry an emit.",
+    "signals-scout-scratchpad-create": {
+        "description": "Upsert an `agent_inference` memory entry keyed on `(team, key)`. Re-using a key updates the existing entry in place and resets its TTL (default 7 days, max 90). Cannot overwrite `human_confirmed` entries — those are managed by humans only. Use this to record \"already saw it\" notes, dedupe keys, validated hypotheses, or narrow the scope of future runs.",
+        "category": "Signals",
+        "feature": "signals",
+        "summary": "Write or refresh an agent memory",
+        "title": "Write or refresh an agent memory",
+        "required_scopes": ["signal_scout_internal:write"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": false
+        }
+    },
+    "signals-scout-scratchpad-delete": {
+        "description": "Delete an `agent_inference` memory entry by key. Returns `deleted=false` if no row matched — the call is idempotent. Cannot delete `human_confirmed` entries.",
+        "category": "Signals",
+        "feature": "signals",
+        "summary": "Forget an agent memory by key",
+        "title": "Forget an agent memory by key",
+        "required_scopes": ["signal_scout_internal:write"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": true,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": false
+        }
+    },
+    "signals-scout-scratchpad-list": {
+        "description": "Return `SignalScratchpad` entries the project has accumulated — known issues, false positives, team steering. ILIKE matches on `content`; tags filter via Postgres array overlap (pass repeated `tags=` query params). Expired `agent_inference` entries are hidden by default; pass `include_expired=true` for audit/debug.",
+        "category": "Signals",
+        "feature": "signals",
+        "summary": "Search durable agent memories",
+        "title": "Search durable agent memories",
+        "required_scopes": ["signal_scout:read"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
+    },
+    "signals-scout-project-profile-get": {
+        "description": "Return a deterministic snapshot of \"what's true about this project\" — products in use, product intents (stuck onboardings), connected integrations, warehouse sources, signal source configs (split enabled/disabled), and existing inbox report counts. Singleton per team; the response reflects either the newest non-expired cached profile or a freshly-built one. Read this once at the start of a run (right after `llma-skill-get`) to orient on the team in one tool call instead of paginating through `inbox-source-configs-list` / `inbox-reports-list` / `read-data-schema` / `activity-log-list`. Distinct from `signals-scout-scratchpad-list`: profile is ground truth from authoritative tables; memory is the agent's inferred learnings.",
+        "category": "Signals",
+        "feature": "signals",
+        "summary": "Get the project profile",
+        "title": "Get the project profile",
+        "required_scopes": ["signal_scout:read"],
+        "new_mcp": true,
+        "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true
+        }
+    },
+    "signals-scout-runs-findings-create": {
+        "description": "Persist a finding to `SignalScoutRun.findings` and fire `emit_signal` with `source_product = signals_scout`. Idempotent on `(run_id, finding_id)` — a second call with the same `finding_id` short-circuits without re-firing the pipeline. Honors the team's `shadow_mode` flag: when true, the finding is persisted on the run row but the external emit is a no-op. Use `weight` to rank, `confidence` to self-grade, and attach evidence citations referencing `error_tracking`, `session_replay`, `logs`, `feature_flags`, etc.",
         "category": "Signals",
         "feature": "signals",
         "summary": "Emit a finding for a run",
@@ -5137,17 +5182,17 @@
         "new_mcp": true,
         "annotations": {
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": true,
             "readOnlyHint": false
         }
     },
     "signals-scout-runs-list": {
-        "description": "Return the most recent `SignalScoutRun` summaries for this project, newest first. Used by the headless scout to dedupe against work other runs already covered. Pass `text` for a case-insensitive substring match on the run's `summary` (the primary dedupe key for runs that didn't emit findings). Pass `since` to scope to a recent window. Results capped at 100.",
+        "description": "Return recent `SignalScoutRun` summaries for the current project, newest first. Used by the headless Signals agent to dedupe its own work — read what other runs already covered before generating new hypotheses. ILIKE matches on `summary`; results are capped at 100 (default 20). Optional `since` window narrows to recent runs only.",
         "category": "Signals",
         "feature": "signals",
-        "summary": "List recent scout runs",
-        "title": "List recent scout runs",
+        "summary": "Search recent agent runs",
+        "title": "Search recent agent runs",
         "required_scopes": ["signal_scout:read"],
         "new_mcp": true,
         "annotations": {
@@ -5158,56 +5203,11 @@
         }
     },
     "signals-scout-runs-retrieve": {
-        "description": "Return the full `SignalScoutRun` row, including the agent's end-of-run `summary`. Status, timestamps, and error flow from the linked `tasks.TaskRun`; emitted findings live as `Signal` rows queryable by `source_id = run:<run_id>:finding:<finding_id>`. Strictly team-scoped — a UUID belonging to another team returns 404.",
+        "description": "Return the full `SignalScoutRun` row including `summary`, `findings`, `hypotheses_considered`, `tool_call_log`, and `metadata`. Strictly team-scoped — a UUID belonging to another project returns 404. Follow up to a row surfaced by `signals-scout-runs-list` when you need the full payload.",
         "category": "Signals",
         "feature": "signals",
-        "summary": "Get a scout run by ID",
-        "title": "Get a scout run by ID",
-        "required_scopes": ["signal_scout:read"],
-        "new_mcp": true,
-        "annotations": {
-            "destructiveHint": false,
-            "idempotentHint": true,
-            "openWorldHint": true,
-            "readOnlyHint": true
-        }
-    },
-    "signals-scout-scratchpad-forget": {
-        "description": "Delete a scratchpad entry by key. Returns `deleted=false` if no row matched — the call is idempotent.",
-        "category": "Signals",
-        "feature": "signals",
-        "summary": "Forget a scratchpad entry by key",
-        "title": "Forget a scratchpad entry by key",
-        "required_scopes": ["signal_scout_internal:write"],
-        "new_mcp": true,
-        "annotations": {
-            "destructiveHint": true,
-            "idempotentHint": true,
-            "openWorldHint": true,
-            "readOnlyHint": false
-        }
-    },
-    "signals-scout-scratchpad-remember": {
-        "description": "Upsert a scratchpad entry keyed on `(team, key)` — re-using a key updates the existing entry in place, so this is an upsert rather than a strict create. Optionally pass `run_id` to record which run wrote it.",
-        "category": "Signals",
-        "feature": "signals",
-        "summary": "Remember a scratchpad entry",
-        "title": "Remember a scratchpad entry",
-        "required_scopes": ["signal_scout_internal:write"],
-        "new_mcp": true,
-        "annotations": {
-            "destructiveHint": false,
-            "idempotentHint": true,
-            "openWorldHint": true,
-            "readOnlyHint": false
-        }
-    },
-    "signals-scout-scratchpad-search": {
-        "description": "Return `SignalScratchpad` entries for this project, newest first. Pass `text` for a case-insensitive substring match on the entry's `content` and `key`. Results capped at 100.",
-        "category": "Signals",
-        "feature": "signals",
-        "summary": "Search the scout scratchpad",
-        "title": "Search the scout scratchpad",
+        "summary": "Get an agent run by ID",
+        "title": "Get an agent run by ID",
         "required_scopes": ["signal_scout:read"],
         "new_mcp": true,
         "annotations": {
@@ -6091,22 +6091,6 @@
         },
         "feature_flag": "visual-review"
     },
-    "visual-review-runs-approve-create": {
-        "description": "Approve visual changes for snapshots in a run. With `approve_all: true`, approves every changed and new snapshot in the run. Otherwise pass an explicit `snapshots` list, each entry being `{identifier, new_hash}` — `new_hash` is the `content_hash` of the snapshot's `current_artifact`. Approval updates the baseline YAML in the repo; `commit_to_github` (default true) also pushes a commit to the PR branch. Confirm with the user before approving — this is the action that ships the visual change.",
-        "category": "Visual review",
-        "feature": "visual_review",
-        "summary": "Approve visual review snapshots",
-        "title": "Approve visual review snapshots",
-        "required_scopes": ["visual_review:write"],
-        "new_mcp": true,
-        "annotations": {
-            "destructiveHint": true,
-            "idempotentHint": false,
-            "openWorldHint": true,
-            "readOnlyHint": false
-        },
-        "feature_flag": "visual-review"
-    },
     "visual-review-runs-counts-retrieve": {
         "description": "Return review state counts across all runs for the current project: `needs_review`, `clean`, `processing`, `stale`. Useful as a single call to show reviewer workload before drilling into the list.",
         "category": "Visual review",
@@ -6172,7 +6156,7 @@
         "feature_flag": "visual-review"
     },
     "visual-review-runs-snapshots-list": {
-        "description": "List all snapshots captured in a run with their diff results. Each snapshot carries an `identifier` (e.g. Storybook story id + theme), a `result` (`unchanged`, `changed`, `new`, `removed`), an optional `classification_reason` (`tolerated_hash`, `below_threshold`, `exact`), diff percentage / pixel count, and `review_state` (`pending`, `approved`). Renders an interactive diff viewer with baseline / current / diff images and approve / tolerate actions. Paginated — pass a `limit` (e.g. 50) when a run might have many snapshots (a broken run can produce 3000+ pairs); the diff viewer caps the visible list at 100 and prioritises actionable results regardless.",
+        "description": "List all snapshots captured in a run with their diff results. Each snapshot carries an `identifier` (e.g. Storybook story id + theme), a `result` (`unchanged`, `changed`, `new`, `removed`), an optional `classification_reason` (`tolerated_hash`, `below_threshold`, `exact`), diff percentage / pixel count, and `review_state` (`pending`, `approved`). Paginated.",
         "category": "Visual review",
         "feature": "visual_review",
         "summary": "List run snapshots",
@@ -6184,22 +6168,6 @@
             "idempotentHint": true,
             "openWorldHint": true,
             "readOnlyHint": true
-        },
-        "feature_flag": "visual-review"
-    },
-    "visual-review-runs-tolerate-create": {
-        "description": "Mark a single changed snapshot as a known tolerated alternate. The snapshot's current hash is recorded alongside the existing baseline so future runs producing the same alternate are not flagged as changes — useful for benign rendering variants (anti-aliasing noise, blinking cursors, etc.). Pass `snapshot_id` — the UUID of the snapshot in this run. Does not change the baseline. Use approve to actually update the baseline image.",
-        "category": "Visual review",
-        "feature": "visual_review",
-        "summary": "Tolerate visual review snapshot",
-        "title": "Tolerate visual review snapshot",
-        "required_scopes": ["visual_review:write"],
-        "new_mcp": true,
-        "annotations": {
-            "destructiveHint": false,
-            "idempotentHint": true,
-            "openWorldHint": true,
-            "readOnlyHint": false
         },
         "feature_flag": "visual-review"
     },
