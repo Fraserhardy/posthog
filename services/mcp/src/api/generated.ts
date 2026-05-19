@@ -1776,11 +1776,6 @@ export namespace Schemas {
       breakdowns?: Breakdown[] | null;
     }
 
-    export interface CalendarHeatmapFilter {
-      /** When true and the series math is `dau`/`unique_users`, each user contributes to the (day-of-week, hour) bucket of their session's first event only — matching the web overview session-start attribution. When false (default), the user contributes to every bucket they have any event in. No effect on `total` math (event counts are unchanged either way). */
-      bucketBySessionStart?: boolean | null;
-    }
-
     export interface CompareFilter {
       /** Whether to compare the current date range to a previous date range. */
       compare?: boolean | null;
@@ -2107,10 +2102,6 @@ export namespace Schemas {
       showTrendLines?: boolean | null;
       showValuesOnSeries?: boolean | null;
       smoothingIntervals?: number | null;
-      /** Custom label rendered under the X axis. */
-      xAxisLabel?: string | null;
-      /** Custom label rendered alongside the Y axis. */
-      yAxisLabel?: string | null;
       yAxisScaleType?: YAxisScaleType | null;
     }
 
@@ -2119,8 +2110,6 @@ export namespace Schemas {
       aggregation_group_type_index?: number | null;
       /** Breakdown of the events and actions */
       breakdownFilter?: BreakdownFilter | null;
-      /** Properties specific to the calendar heatmap display variant. Only consulted when `trendsFilter.display === ChartDisplayType.CalendarHeatmap`; ignored otherwise. */
-      calendarHeatmapFilter?: CalendarHeatmapFilter | null;
       /** Compare to date range */
       compareFilter?: CompareFilter | null;
       /** Whether we should be comparing against a specific conversion goal */
@@ -2405,10 +2394,10 @@ export namespace Schemas {
       timings?: QueryTiming[] | null;
     }
 
-    export type AggregationPropertyType = typeof AggregationPropertyType[keyof typeof AggregationPropertyType];
+    export type AggregationPropertyType1 = typeof AggregationPropertyType1[keyof typeof AggregationPropertyType1];
 
 
-    export const AggregationPropertyType = {
+    export const AggregationPropertyType1 = {
       Event: 'event',
       Person: 'person',
       DataWarehouse: 'data_warehouse',
@@ -2517,7 +2506,7 @@ export namespace Schemas {
       /** The property to aggregate when aggregationType is sum or avg */
       aggregationProperty?: string | null;
       /** The type of property to aggregate on (event, person or data_warehouse). Defaults to event. */
-      aggregationPropertyType?: AggregationPropertyType | null;
+      aggregationPropertyType?: AggregationPropertyType1 | null;
       /** The aggregation type to use for retention */
       aggregationType?: AggregationType | null;
       /** Starting index used when labeling cohort columns (e.g. 0 for D0/D1/D2, 1 for D1/D2/D3). Display-only — does not affect retention calculations. */
@@ -4362,18 +4351,13 @@ export namespace Schemas {
     }
 
     export interface ApproveSnapshotInput {
-      /** The snapshot identifier to approve (e.g. Storybook story id plus theme). */
       identifier: string;
-      /** The content hash of the new baseline image to record for this identifier. */
       new_hash: string;
     }
 
     export interface ApproveRunRequestInput {
-      /** Specific snapshots to approve, each with `identifier` and `new_hash`. Ignored when `approve_all` is true. */
       snapshots?: ApproveSnapshotInput[];
-      /** Approve every changed and new snapshot in the run. Mutually exclusive with `snapshots` — pass one or the other. */
       approve_all?: boolean;
-      /** Whether to commit the updated baseline YAML to the PR branch on GitHub. Set to false to record the approval without pushing a commit. */
       commit_to_github?: boolean;
     }
 
@@ -6781,6 +6765,10 @@ export namespace Schemas {
       readonly last_used_at: string | null;
       /** Plaintext token, only returned on creation */
       readonly value: string;
+    }
+
+    export interface CalendarHeatmapFilter {
+      dummy?: string | null;
     }
 
     export interface EventsHeatMapColumnAggregationResult {
@@ -13452,7 +13440,7 @@ export namespace Schemas {
     }
 
     /**
-     * One citation attached to a finding. Mirrors `SignalsAgentEvidenceEntry`.
+     * One citation attached to a finding. Mirrors `SignalsScoutEvidenceEntry`.
      */
     export interface EvidenceEntry {
       /** Source the citation came from (`error_tracking`, `session_replay`, `logs`, ...). */
@@ -13460,9 +13448,9 @@ export namespace Schemas {
       /** One-sentence prose about why this evidence supports the finding. */
       summary: string;
       /**
-       * Optional ID of the cited entity (issue id, recording id, log query id).
-       * @nullable
-       */
+         * Optional ID of the cited entity (issue id, recording id, log query id).
+         * @nullable
+         */
       entity_id?: string | null;
     }
 
@@ -13480,45 +13468,45 @@ export namespace Schemas {
       /** Canonical evidence-bundle prose. Becomes the signal's `description`. */
       description: string;
       /**
-       * Agent's weight for the signal in [0, 1]. Drives ranking in the inbox.
-       * @minimum 0
-       * @maximum 1
-       */
+         * Agent's weight for the signal in [0, 1]. Drives ranking in the inbox.
+         * @minimum 0
+         * @maximum 1
+         */
       weight: number;
       /**
-       * Agent's confidence the finding is real in [0, 1]. Persisted in `extra`.
-       * @minimum 0
-       * @maximum 1
-       */
+         * Agent's confidence the finding is real in [0, 1]. Persisted in `extra`.
+         * @minimum 0
+         * @maximum 1
+         */
       confidence: number;
       /**
-       * Citations supporting the finding. Capped at 20 entries.
-       * @maxItems 20
-       */
+         * Citations supporting the finding. Capped at 20 entries.
+         * @maxItems 20
+         */
       evidence: EvidenceEntry[];
       /**
-       * Optional one-line hypothesis the finding tests.
-       * @nullable
-       */
+         * Optional one-line hypothesis the finding tests.
+         * @nullable
+         */
       hypothesis?: string | null;
       /**
-       * Optional severity tag (`P0`-`P4`) — informational only.
-       * @nullable
-       */
+         * Optional severity tag (`P0`-`P4`) — informational only.
+         * @nullable
+         */
       severity?: string | null;
       /** Optional keys for downstream dedupe (e.g. `error_tracking_issue:<id>`). */
       dedupe_keys?: string[];
       /** Optional time window the finding refers to. */
       time_range?: TimeRange | null;
       /**
-       * Optional MCP trace id for cross-system debugging.
-       * @nullable
-       */
+         * Optional MCP trace id for cross-system debugging.
+         * @nullable
+         */
       mcp_trace_id?: string | null;
       /**
-       * Idempotency key. Re-using the same id within a run short-circuits without re-emitting.
-       * @nullable
-       */
+         * Idempotency key. Re-using the same id within a run short-circuits without re-emitting.
+         * @nullable
+         */
       finding_id?: string | null;
     }
 
@@ -13528,9 +13516,9 @@ export namespace Schemas {
       /** Whether `emit_signal` was actually fired. */
       emitted: boolean;
       /**
-       * `shadow_mode` | `already_emitted` | null when emitted normally.
-       * @nullable
-       */
+         * `shadow_mode` | `already_emitted` | null when emitted normally.
+         * @nullable
+         */
       skipped_reason: string | null;
     }
 
@@ -13659,11 +13647,6 @@ export namespace Schemas {
          * @nullable
          */
       deleted?: boolean | null;
-      /**
-         * List of tag names to associate with this endpoint. Replaces any existing tags.
-         * @nullable
-         */
-      tags?: string[] | null;
     }
 
     /**
@@ -13739,8 +13722,6 @@ export namespace Schemas {
       bucket_overrides: EndpointResponseBucketOverrides;
       /** Column names and types from the query's SELECT clause. */
       columns: EndpointColumn[];
-      /** Tag names associated with this endpoint. */
-      tags: string[];
     }
 
     /**
@@ -13870,8 +13851,6 @@ export namespace Schemas {
       bucket_overrides: EndpointVersionResponseBucketOverrides;
       /** Column names and types from the query's SELECT clause. */
       columns: EndpointColumn[];
-      /** Tag names associated with this endpoint. */
-      tags: string[];
       /** Version number. */
       version: number;
       /** Version unique identifier (UUID). */
@@ -15133,34 +15112,6 @@ export namespace Schemas {
     export interface ErrorTrackingSymbolSetFinishUpload {
       /** Hash of the uploaded symbol set content. */
       content_hash: string;
-    }
-
-    /**
-     * Body of POST /vision/scanners/estimate/ — a proposed, unsaved scanner config.
-     */
-    export interface EstimateRequest {
-      /** Proposed `RecordingsQuery` for the candidate filter. `date_from`/`date_to` are ignored — the estimate always uses a fixed 30-day lookback. Omit to estimate against all recordings. */
-      query?: unknown;
-      /**
-         * 0..1 downsample applied to matched sessions. Defaults to 1.0 (no downsampling).
-         * @minimum 0
-         * @maximum 1
-         */
-      sampling_rate?: number;
-    }
-
-    /**
-     * Forward-looking observation-volume estimate for a proposed scanner. Pricing-agnostic.
-     */
-    export interface EstimateResponse {
-      /** Distinct sessions matching the query within the 30-day lookback, before sampling. */
-      matched_sessions_in_window: number;
-      /** Lookback window the estimate is based on. Normally 30; smaller when the team has fewer days of recordings. */
-      window_days: number;
-      /** Projected monthly observations: matched sessions scaled to 30 days, times sampling_rate. */
-      estimated_observations_per_month: number;
-      /** Sampling rate applied to the projection. Echoed from the request. */
-      sampling_rate: number;
     }
 
     /**
@@ -17333,32 +17284,6 @@ export namespace Schemas {
 
     /**
      * * `events` - events
-    * `persons` - persons
-    * `sessions` - sessions
-     */
-    export type FileDownloadBatchExportOnDemandModelEnum = typeof FileDownloadBatchExportOnDemandModelEnum[keyof typeof FileDownloadBatchExportOnDemandModelEnum];
-
-
-    export const FileDownloadBatchExportOnDemandModelEnum = {
-      Events: 'events',
-      Persons: 'persons',
-      Sessions: 'sessions',
-    } as const;
-
-    /**
-     * Request shape for a FileDownload batch export on demand.
-     */
-    export interface FileDownloadBatchExportOnDemand {
-      file: FileDownloadDestinationFileConfig;
-      model: FileDownloadBatchExportOnDemandModelEnum;
-      include?: string[];
-      exclude?: string[];
-      data_interval_start: string;
-      data_interval_end: string;
-    }
-
-    /**
-     * * `events` - events
      */
     export type FileDownloadEventsRequestModelEnum = typeof FileDownloadEventsRequestModelEnum[keyof typeof FileDownloadEventsRequestModelEnum];
 
@@ -17448,9 +17373,9 @@ export namespace Schemas {
      */
     export interface ForgetRequest {
       /**
-       * Memory key to delete.
-       * @maxLength 300
-       */
+         * Memory key to delete.
+         * @maxLength 300
+         */
       key: string;
     }
 
@@ -21313,7 +21238,6 @@ export namespace Schemas {
     }
 
     export interface MarkToleratedInput {
-      /** UUID of the changed snapshot to mark as a known tolerated alternate. Future runs that produce the same alternate hash for this identifier will not be flagged as changes. */
       snapshot_id: string;
     }
 
@@ -21409,40 +21333,6 @@ export namespace Schemas {
       /** @maxLength 10000 */
       text: string;
       scraping_status?: ScrapingStatusEnum | BlankEnum | null;
-    }
-
-    /**
-     * `SignalMemory` projection used by `search-memory` and `remember`.
-     */
-    export interface MemoryEntry {
-      /** Agent-chosen semantic key, unique per team. */
-      key: string;
-      /** Prose content for prompt injection. */
-      content: string;
-      /** `agent_inference` (TTL'd, agent-writable) or `human_confirmed`. */
-      authority: string;
-      /** Free-form tags the agent uses to scope search; matched via Postgres array overlap. */
-      tags: string[];
-      /**
-       * ISO-8601 creation timestamp.
-       * @nullable
-       */
-      created_at: string | null;
-      /**
-       * ISO-8601 last-write timestamp.
-       * @nullable
-       */
-      updated_at: string | null;
-      /**
-       * ISO-8601 expiry; null only on `human_confirmed` entries.
-       * @nullable
-       */
-      expires_at: string | null;
-      /**
-       * Run that wrote this entry, or null if human-authored.
-       * @nullable
-       */
-      created_by_run_id: string | null;
     }
 
     export type MessageContextualTools = { [key: string]: unknown };
@@ -21838,7 +21728,6 @@ export namespace Schemas {
     * `running` - Running
     * `succeeded` - Succeeded
     * `failed` - Failed
-    * `ineligible` - Ineligible
      */
     export type ObservationStatusEnum = typeof ObservationStatusEnum[keyof typeof ObservationStatusEnum];
 
@@ -21848,7 +21737,6 @@ export namespace Schemas {
       Running: 'running',
       Succeeded: 'succeeded',
       Failed: 'failed',
-      Ineligible: 'ineligible',
     } as const;
 
     /**
@@ -23184,15 +23072,6 @@ export namespace Schemas {
       results: MaxCoreMemory[];
     }
 
-    export interface PaginatedMemoryEntryList {
-      count: number;
-      /** @nullable */
-      next?: string | null;
-      /** @nullable */
-      previous?: string | null;
-      results: MemoryEntry[];
-    }
-
     export interface PaginatedMessageCategoryList {
       count: number;
       /** @nullable */
@@ -23704,15 +23583,14 @@ export namespace Schemas {
       readonly scanner_id: string;
       /** Session recording id this scanner was applied to. */
       readonly session_id: string;
-      /** Observation status (pending, running, succeeded, failed, ineligible).
+      /** Observation status (pending, running, succeeded, failed).
 
       * `pending` - Pending
       * `running` - Running
       * `succeeded` - Succeeded
-      * `failed` - Failed
-      * `ineligible` - Ineligible */
+      * `failed` - Failed */
       readonly status: ObservationStatusEnum;
-      /** Populated on terminal non-success statuses; formatted as `kind:human-readable message`. For `ineligible`, kind is one of no_recording / too_short / too_inactive / too_long / no_events. For `failed`, kind is one of provider_transient / provider_rejected / rasterization_failed / validation_failed / internal_error. */
+      /** Populated on failure; includes the malformed model response when validation fails. */
       readonly error_reason: string;
       /** Temporal workflow id for progress queries and debugging. Empty until the workflow starts. */
       readonly workflow_id: string;
@@ -24110,6 +23988,49 @@ export namespace Schemas {
       results: ScoreDefinition[];
     }
 
+    /**
+     * `SignalScratchpad` projection used by `search-memory` and `remember`.
+     */
+    export interface ScratchpadEntry {
+      /** Agent-chosen semantic key, unique per team. */
+      key: string;
+      /** Prose content for prompt injection. */
+      content: string;
+      /** Always `agent_inference` in v1; reserved for future human-confirmed entries. */
+      authority: string;
+      /** Free-form tags the agent uses to scope search; matched via Postgres array overlap. */
+      tags: string[];
+      /**
+         * ISO-8601 creation timestamp.
+         * @nullable
+         */
+      created_at: string | null;
+      /**
+         * ISO-8601 last-write timestamp.
+         * @nullable
+         */
+      updated_at: string | null;
+      /**
+         * ISO-8601 expiry timestamp (null = no expiry, reserved for future use).
+         * @nullable
+         */
+      expires_at: string | null;
+      /**
+         * Run that wrote this entry, or null if human-authored.
+         * @nullable
+         */
+      created_by_run_id: string | null;
+    }
+
+    export interface PaginatedScratchpadEntryList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: ScratchpadEntry[];
+    }
+
     export interface SessionGroupSummaryMinimal {
       readonly id: string;
       /** Title of the group session summary */
@@ -24290,40 +24211,6 @@ export namespace Schemas {
     }
 
     /**
-     * Lightweight projection of a `SignalAgentRun` row used by `search-recent-runs`.
-     */
-    export interface SignalAgentRunSummary {
-      /** UUID of the run row. */
-      run_id: string;
-      /** Canonical skill name the run executed (e.g. `signals-agent-scout`). */
-      skill_name: string;
-      /** Skill version snapshotted at run start. */
-      skill_version: number;
-      /** Run status: scheduled | running | completed | failed | abandoned. */
-      status: string;
-      /** ISO-8601 timestamp the run row was inserted. */
-      started_at: string;
-      /**
-       * ISO-8601 timestamp the run finalized; null while still running.
-       * @nullable
-       */
-      completed_at: string | null;
-      /** Prose: what this run looked at, found, and skipped. ILIKE search target for dedupe. */
-      summary: string;
-      /** Number of finding entries persisted on the run row. */
-      findings_count: number;
-    }
-
-    export interface PaginatedSignalAgentRunSummaryList {
-      count: number;
-      /** @nullable */
-      next?: string | null;
-      /** @nullable */
-      previous?: string | null;
-      results: SignalAgentRunSummary[];
-    }
-
-    /**
      * * `potential` - Potential
     * `candidate` - Candidate
     * `in_progress` - In Progress
@@ -24394,6 +24281,55 @@ export namespace Schemas {
       /** @nullable */
       previous?: string | null;
       results: SignalReport[];
+    }
+
+    /**
+     * Lightweight projection of a `SignalScoutRun` row used by `search-recent-runs`.
+     */
+    export interface SignalScoutRunSummary {
+      /** UUID of the run row. */
+      run_id: string;
+      /** Canonical skill name the run executed (e.g. `signals-scout-general`). */
+      skill_name: string;
+      /** Skill version snapshotted at run start. */
+      skill_version: number;
+      /** Run status: scheduled | running | completed | failed | abandoned. */
+      status: string;
+      /** ISO-8601 timestamp the run row was inserted. */
+      started_at: string;
+      /**
+         * ISO-8601 timestamp the run finalized; null while still running.
+         * @nullable
+         */
+      completed_at: string | null;
+      /** Prose: what this run looked at, found, and skipped. ILIKE search target for dedupe. */
+      summary: string;
+      /** Number of finding entries persisted on the run row. */
+      findings_count: number;
+      /**
+         * UUID of the Tasks `Task` the harness span ran inside. Null on aborted rows or rows older than the linkage capture.
+         * @nullable
+         */
+      task_id?: string | null;
+      /**
+         * UUID of the Tasks `TaskRun` (the specific execution of the task). Pairs with `task_id` to deep-link.
+         * @nullable
+         */
+      task_run_id?: string | null;
+      /**
+         * Relative deep-link to the Tasks UI for this run, e.g. `/project/{team_id}/tasks/{task_id}?runId={task_run_id}`. Null when either `task_id` or `task_run_id` is missing.
+         * @nullable
+         */
+      task_url?: string | null;
+    }
+
+    export interface PaginatedSignalScoutRunSummaryList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: SignalScoutRunSummary[];
     }
 
     /**
@@ -24504,7 +24440,6 @@ export namespace Schemas {
       reviewed_by?: UserBasicInfo | null;
       cluster_summary?: ClusterSummary | null;
       id: string;
-      run_id: string;
       identifier: string;
       result: string;
       classification_reason: string;
@@ -26223,85 +26158,6 @@ export namespace Schemas {
     }
 
     /**
-     * * `idle` - IDLE
-    * `running` - RUNNING
-    * `completed` - COMPLETED
-    * `error` - ERROR
-     */
-    export type RunPhaseEnum = typeof RunPhaseEnum[keyof typeof RunPhaseEnum];
-
-
-    export const RunPhaseEnum = {
-      Idle: 'idle',
-      Running: 'running',
-      Completed: 'completed',
-      Error: 'error',
-    } as const;
-
-    /**
-     * * `pending` - PENDING
-    * `in_progress` - IN_PROGRESS
-    * `completed` - COMPLETED
-    * `failed` - FAILED
-    * `canceled` - CANCELED
-     */
-    export type WizardTaskDTOStatusEnum = typeof WizardTaskDTOStatusEnum[keyof typeof WizardTaskDTOStatusEnum];
-
-
-    export const WizardTaskDTOStatusEnum = {
-      Pending: 'pending',
-      InProgress: 'in_progress',
-      Completed: 'completed',
-      Failed: 'failed',
-      Canceled: 'canceled',
-    } as const;
-
-    export interface WizardTaskDTO {
-      id: string;
-      title: string;
-      status: WizardTaskDTOStatusEnum;
-    }
-
-    /**
-     * @nullable
-     */
-    export type WizardSessionDTOEventPlan = { [key: string]: unknown } | null;
-
-    /**
-     * @nullable
-     */
-    export type WizardSessionDTOError = { [key: string]: unknown } | null;
-
-    /**
-     * Output: serialises a WizardSessionDTO returned by the facade.
-     */
-    export interface WizardSessionDTO {
-      session_id: string;
-      team_id: number;
-      workflow_id: string;
-      skill_id: string;
-      started_at: string;
-      run_phase: RunPhaseEnum;
-      tasks: WizardTaskDTO[];
-      /** @nullable */
-      event_plan: WizardSessionDTOEventPlan;
-      /** @nullable */
-      error: WizardSessionDTOError;
-      created_at: string;
-      updated_at: string;
-      is_stale: boolean;
-    }
-
-    export interface PaginatedWizardSessionDTOList {
-      count: number;
-      /** @nullable */
-      next?: string | null;
-      /** @nullable */
-      previous?: string | null;
-      results: WizardSessionDTO[];
-    }
-
-    /**
      * Typed account properties: assignment fields (csm, account_executive, account_owner) and external system identifiers (stripe_customer_id, hubspot_deal_id, billing_id, sfdc_id, zendesk_id). Defaults to an empty object. Unknown keys are rejected.
      * @nullable
      */
@@ -27419,11 +27275,6 @@ export namespace Schemas {
          * @nullable
          */
       deleted?: boolean | null;
-      /**
-         * List of tag names to associate with this endpoint. Replaces any existing tags.
-         * @nullable
-         */
-      tags?: string[] | null;
     }
 
     /**
@@ -35124,24 +34975,24 @@ export namespace Schemas {
      */
     export interface RememberRequest {
       /**
-       * Agent-chosen semantic key. Re-using a key updates the existing entry in place.
-       * @maxLength 300
-       */
+         * Agent-chosen semantic key. Re-using a key updates the existing entry in place.
+         * @maxLength 300
+         */
       key: string;
       /** Prose to write. Read verbatim into future prompts. */
       content: string;
       /** Tags for later search. Empty/whitespace tags are dropped. */
       tags?: string[];
       /**
-       * Days until expiry (default 7, hard cap 90).
-       * @minimum 1
-       * @maximum 90
-       */
+         * Days until expiry (default 7, hard cap 90).
+         * @minimum 1
+         * @maximum 90
+         */
       ttl_days?: number;
       /**
-       * Run that authored this memory; persisted as `created_by_run_id` for lineage.
-       * @nullable
-       */
+         * Run that authored this memory; persisted as `created_by_run_id` for lineage. Must reference a run on this same project — cross-project run UUIDs are rejected.
+         * @nullable
+         */
       run_id?: string | null;
     }
 
@@ -35692,26 +35543,24 @@ export namespace Schemas {
       release_to_everyone?: boolean;
     }
 
-    export type SignalAgentRunDetailFindingsItem = { [key: string]: unknown };
+    export type SignalScoutRunDetailFindingsItem = { [key: string]: unknown };
 
-    export type SignalAgentRunDetailHypothesesConsideredItem = { [key: string]: unknown };
-
-    export type SignalAgentRunDetailToolCallLogItem = { [key: string]: unknown };
+    export type SignalScoutRunDetailHypothesesConsideredItem = { [key: string]: unknown };
 
     /**
-     * {tool_calls, cost_usd, runtime_s, findings} — actual usage.
+     * Measured quantities about how the run went, e.g. {runtime_s, findings}.
      */
-    export type SignalAgentRunDetailBudgetUsed = {[key: string]: number};
+    export type SignalScoutRunDetailRunMetrics = {[key: string]: number};
 
     /**
-     * Run metadata snapshot (budget caps, skill id, allowed_tools resolution).
+     * Run metadata snapshot (limits, skill id, allowed_tools resolution, plus `task_id` / `task_run_id` for the Tasks UI cross-link).
      */
-    export type SignalAgentRunDetailMetadata = { [key: string]: unknown };
+    export type SignalScoutRunDetailMetadata = { [key: string]: unknown };
 
     /**
-     * Full `SignalAgentRun` projection used by `get-run`. Includes structured payloads.
+     * Full `SignalScoutRun` projection used by `get-run`. Includes structured payloads.
      */
-    export interface SignalAgentRunDetail {
+    export interface SignalScoutRunDetail {
       /** UUID of the run row. */
       run_id: string;
       /** Canonical skill name the run executed. */
@@ -35723,22 +35572,35 @@ export namespace Schemas {
       /** ISO-8601 timestamp the run row was inserted. */
       started_at: string;
       /**
-       * ISO-8601 timestamp the run finalized.
-       * @nullable
-       */
+         * ISO-8601 timestamp the run finalized.
+         * @nullable
+         */
       completed_at: string | null;
       /** Prose summary of the run. */
       summary: string;
       /** Findings persisted to the run row, including pre-emit attribution. */
-      findings: SignalAgentRunDetailFindingsItem[];
+      findings: SignalScoutRunDetailFindingsItem[];
       /** Hypotheses the run considered, including ones it explicitly skipped. */
-      hypotheses_considered: SignalAgentRunDetailHypothesesConsideredItem[];
-      /** Per-tool-call log entries for this run. */
-      tool_call_log: SignalAgentRunDetailToolCallLogItem[];
-      /** {tool_calls, cost_usd, runtime_s, findings} — actual usage. */
-      budget_used: SignalAgentRunDetailBudgetUsed;
-      /** Run metadata snapshot (budget caps, skill id, allowed_tools resolution). */
-      metadata: SignalAgentRunDetailMetadata;
+      hypotheses_considered: SignalScoutRunDetailHypothesesConsideredItem[];
+      /** Measured quantities about how the run went, e.g. {runtime_s, findings}. */
+      run_metrics: SignalScoutRunDetailRunMetrics;
+      /** Run metadata snapshot (limits, skill id, allowed_tools resolution, plus `task_id` / `task_run_id` for the Tasks UI cross-link). */
+      metadata: SignalScoutRunDetailMetadata;
+      /**
+         * UUID of the Tasks `Task` the harness span ran inside. Null on aborted rows or rows older than the linkage capture.
+         * @nullable
+         */
+      task_id?: string | null;
+      /**
+         * UUID of the Tasks `TaskRun` (the specific execution of the task). Pairs with `task_id` to deep-link.
+         * @nullable
+         */
+      task_run_id?: string | null;
+      /**
+         * Relative deep-link to the Tasks UI for this run, e.g. `/project/{team_id}/tasks/{task_id}?runId={task_run_id}`. Null when either `task_id` or `task_run_id` is missing.
+         * @nullable
+         */
+      task_url?: string | null;
     }
 
     export interface _User {
@@ -37415,59 +37277,6 @@ export namespace Schemas {
          * @maxLength 10
          */
       target_language?: string;
-    }
-
-    /**
-     * Optional structured plan of events the wizard intends to instrument. Schema is workflow-specific.
-     * @nullable
-     */
-    export type UpsertWizardSessionRequestEventPlan = { [key: string]: unknown } | null;
-
-    /**
-     * Populated when run_phase='error'. Shape: { type: string, message: string }.
-     * @nullable
-     */
-    export type UpsertWizardSessionRequestError = { [key: string]: unknown } | null;
-
-    /**
-     * Input: validates the JSON the wizard CLI posts. team_id is derived from URL.
-     */
-    export interface UpsertWizardSessionRequest {
-      /**
-         * Stable identifier the wizard mints for this run (format: '{workflow_id}-{skill_id}-{started_at_iso}'). Reposting with the same session_id upserts the existing row.
-         * @maxLength 255
-         */
-      session_id: string;
-      /**
-         * High-level workflow being run, e.g. 'onboarding', 'migration', 'audit'.
-         * @maxLength 255
-         */
-      workflow_id: string;
-      /**
-         * Specific skill within the workflow, e.g. 'nextjs', 'django', 'laravel'.
-         * @maxLength 255
-         */
-      skill_id: string;
-      /** UTC timestamp when the wizard started this run. Matches the timestamp encoded in session_id. */
-      started_at: string;
-      /** Lifecycle stage of the wizard run.
-
-      * `idle` - IDLE
-      * `running` - RUNNING
-      * `completed` - COMPLETED
-      * `error` - ERROR */
-      run_phase: RunPhaseEnum;
-      tasks: WizardTaskDTO[];
-      /**
-         * Optional structured plan of events the wizard intends to instrument. Schema is workflow-specific.
-         * @nullable
-         */
-      event_plan?: UpsertWizardSessionRequestEventPlan;
-      /**
-         * Populated when run_phase='error'. Shape: { type: string, message: string }.
-         * @nullable
-         */
-      error?: UpsertWizardSessionRequestError;
     }
 
     /**
@@ -42083,21 +41892,6 @@ export namespace Schemas {
     topic?: string;
     };
 
-    export type VisionObservationsListParams = {
-    /**
-     * Number of results to return per page.
-     */
-    limit?: number;
-    /**
-     * The initial index from which to return the results.
-     */
-    offset?: number;
-    /**
-     * Session recording id to return observations for.
-     */
-    session_id: string;
-    };
-
     export type VisionScannersListParams = {
     /**
      * Filter to scanners that emit Signals.
@@ -42184,7 +41978,6 @@ export namespace Schemas {
     * `running` - Running
     * `succeeded` - Succeeded
     * `failed` - Failed
-    * `ineligible` - Ineligible
      */
     status?: VisionScannersObservationsListStatus;
     /**
@@ -42201,7 +41994,6 @@ export namespace Schemas {
 
     export const VisionScannersObservationsListStatus = {
       Failed: 'failed',
-      Ineligible: 'ineligible',
       Pending: 'pending',
       Running: 'running',
       Succeeded: 'succeeded',
@@ -46381,7 +46173,7 @@ export namespace Schemas {
     offset?: number;
     };
 
-    export type SignalsAgentHarnessMemoryListParams = {
+    export type SignalsAgentMemoryListParams = {
     /**
      * Include expired `agent_inference` entries (default false). Use for audit/debug only.
      */
@@ -46406,7 +46198,7 @@ export namespace Schemas {
     text?: string;
     };
 
-    export type SignalsAgentHarnessRunsListParams = {
+    export type SignalsAgentRunsListParams = {
     /**
      * Max rows to return (default 20, hard cap 100).
      * @minimum 1
@@ -46965,25 +46757,6 @@ export namespace Schemas {
      * The initial index from which to return the results.
      */
     offset?: number;
-    };
-
-    export type WizardSessionsListParams = {
-    /**
-     * Number of results to return per page.
-     */
-    limit?: number;
-    /**
-     * The initial index from which to return the results.
-     */
-    offset?: number;
-    /**
-     * Filter to a single skill within the workflow (e.g. 'nextjs').
-     */
-    skill_id?: string;
-    /**
-     * Filter to a single workflow (e.g. 'onboarding').
-     */
-    workflow_id?: string;
     };
 
     export type PublicHogFunctionTemplatesListParams = {
