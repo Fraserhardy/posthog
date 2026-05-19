@@ -2,7 +2,7 @@
 
 ## Overview
 
-The **Signals** product is a signal grouping and report-generation pipeline. Signals from multiple products and integrations — including session replay, AI observability, error tracking, GitHub, Linear, Zendesk, and the headless **Signals agent** itself (a scheduled scout that emits cross-source findings into the same pipeline) — are emitted into a shared ClickHouse embeddings table, grouped into **SignalReports** via embedding similarity + LLM matching, and then optionally promoted into an agentic report-research flow.
+The **Signals** product is a signal grouping and report-generation pipeline. Signals from multiple products and integrations — including session replay, AI observability, error tracking, GitHub, Linear, Zendesk, and the headless **Signals scout** itself (a scheduled scout that emits cross-source findings into the same pipeline) — are emitted into a shared ClickHouse embeddings table, grouped into **SignalReports** via embedding similarity + LLM matching, and then optionally promoted into an agentic report-research flow.
 
 Today the active ingestion path is **emitter → buffer → grouping v2**. The summary path is no longer a simple "summarize signals" LLM step: it runs a report-level safety judge, selects a repository, then performs sandbox-backed multi-turn research that produces findings, actionability, priority, title, summary, and suggested reviewers. Reports that are immediately actionable can automatically start a Tasks coding run via the **autonomy** system.
 
@@ -21,8 +21,8 @@ Several additional Signals workflows also exist but are not part of the main rep
 
 - `backfill-error-tracking` (`backend/temporal/backfill_error_tracking.py`) — backfills recent error tracking issues as signals
 - `emit-eval-signal` (`backend/temporal/emit_eval_signal.py`) — converts LLMA evaluation results into Signals inputs on the Signals worker queue
-- `run-signals-agent-coordinator` (`backend/temporal/agentic/agent_coordinator.py`) — hourly tick that fans out scheduled `signals-agent-*` scout runs per (team, skill). Spec'd separately below.
-- `RunSignalsAgentWorkflow` (`backend/temporal/agentic/agent_scheduler.py`) — child workflow per planned run; thin wrapper around the harness activity. Spec'd separately below.
+- `run-signals-scout-coordinator` (`backend/temporal/agentic/scout_coordinator.py`) — hourly tick that fans out scheduled `signals-scout-*` scout runs per (team, skill). Spec'd separately below.
+- `RunSignalsScoutWorkflow` (`backend/temporal/agentic/scout_scheduler.py`) — child workflow per planned run; thin wrapper around the harness activity. Spec'd separately below.
 
 ### Activity decoration
 
@@ -281,26 +281,26 @@ Defined in `backend/temporal/deletion.py`. Workflow ID: `signal-report-deletion-
 
 This shares the same activities as reingestion; the only difference is that it stops after deletion.
 
-### `SignalsAgentCoordinatorWorkflow` (`run-signals-agent-coordinator`)
+### `SignalsScoutCoordinatorWorkflow` (`run-signals-scout-coordinator`)
 
-Hourly coordinator for the headless **Signals agent**. Driven by a Temporal Schedule
+Hourly coordinator for the headless **Signals scout**. Driven by a Temporal Schedule
 defined in `backend/temporal/agentic/schedule.py` with `every=COORDINATOR_INTERVAL_MINUTES`
 (60min) and `ScheduleOverlapPolicy.SKIP` to drop ticks rather than queue them.
 
-Defined in `backend/temporal/agentic/agent_coordinator.py`.
+Defined in `backend/temporal/agentic/scout_coordinator.py`.
 
 **Flow:**
 
-1. Activity `fetch_enabled_signals_agent_runs_activity` scans every enabled `SignalAgentConfig`. Each team is then run through the `signals-agent` rollout flag (`agent_harness/feature_flags.team_passes_rollout_flag`); flag-off teams are logged and skipped without contributing planned runs. For each remaining team, the activity calls `sync_canonical_skills(team)` to mirror the on-disk `signals-agent-*` skills onto the team's `LLMSkill` rows. Failures here are logged and the tick continues — a stale skill is preferable to a dead tick.
-2. For each team, the coordinator builds the candidate skill set (either `enabled_skill_names` intersected with available skills, or all `signals-agent-*` skills the team has) and samples `min(config.runs_per_tick, len(candidates))` skills uniformly at random _without replacement_.
+1. Activity `fetch_enabled_signals_scout_runs_activity` scans every enabled `SignalScoutConfig`. Each team is then run through the `signals-scout` rollout flag (`scout_harness/feature_flags.team_passes_rollout_flag`); flag-off teams are logged and skipped without contributing planned runs. For each remaining team, the activity calls `sync_canonical_skills(team)` to mirror the on-disk `signals-scout-*` skills onto the team's `LLMSkill` rows. Failures here are logged and the tick continues — a stale skill is preferable to a dead tick.
+2. For each team, the coordinator builds the candidate skill set (either `enabled_skill_names` intersected with available skills, or all `signals-scout-*` skills the team has) and samples `min(config.runs_per_tick, len(candidates))` skills uniformly at random _without replacement_.
 3. Planned runs are sorted by `(team_id, skill_name)` and truncated at `MAX_RUNS_PER_TICK` (50 per tick, defense in depth against config explosions).
-4. Each `PlannedRun` becomes a child `RunSignalsAgentWorkflow` started with `ParentClosePolicy.ABANDON` and a deterministic workflow ID per `(team_id, skill_name, tick_id)` so retried coordinators can't double-launch within a tick.
+4. Each `PlannedRun` becomes a child `RunSignalsScoutWorkflow` started with `ParentClosePolicy.ABANDON` and a deterministic workflow ID per `(team_id, skill_name, tick_id)` so retried coordinators can't double-launch within a tick.
 
 The coordinator's lifetime is seconds regardless of fan-out width; throttling happens at the Temporal task queue + worker concurrency layer. Edge cases handled in-place (no exceptions): `runs_per_tick=0` → soft-pause for that tick (team stays `enabled=True`); `runs_per_tick > len(candidates)` → clamps to candidate count.
 
-### `RunSignalsAgentWorkflow`
+### `RunSignalsScoutWorkflow`
 
-Child workflow per planned run. Defined in `backend/temporal/agentic/agent_scheduler.py`.
+Child workflow per planned run. Defined in `backend/temporal/agentic/scout_scheduler.py`.
 
 Thin wrapper around `run_signals_scout_activity`, which delegates to
 `scout_harness.runner.arun_signals_scout`. The activity inserts the `SignalScoutRun`
@@ -317,7 +317,7 @@ model's own status column; active recovery of stranded `IN_PROGRESS` task runs
 (`_self_heal_stale_runs` is a no-op today) is a tracked follow-up.
 
 Findings emitted during the run go through the harness's `emit_signal_*` tools,
-which call `emit_signal()` with `source_product="signals_agent"` and
+which call `emit_signal()` with `source_product="signals_scout"` and
 `source_type="cross_source_issue"` — from there the signal flows through the same
 emitter → buffer → grouping v2 path as any other source.
 
@@ -469,7 +469,7 @@ Per-team configuration for which signal sources are enabled.
 | Field            | Type      | Description                                                                                                                                                       |
 | ---------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `team`           | FK → Team | Owning team (`related_name="signal_source_configs"`)                                                                                                              |
-| `source_product` | CharField | One of: `session_replay`, `llm_analytics`, `github`, `linear`, `zendesk`, `conversations`, `error_tracking`, `signals_agent` (`SourceProduct` enum)               |
+| `source_product` | CharField | One of: `session_replay`, `llm_analytics`, `github`, `linear`, `zendesk`, `conversations`, `error_tracking`, `signals_scout` (`SourceProduct` enum)               |
 | `source_type`    | CharField | One of: `session_analysis_cluster`, `evaluation`, `issue`, `ticket`, `issue_created`, `issue_reopened`, `issue_spiking`, `cross_source_issue` (`SourceType` enum) |
 | `enabled`        | Boolean   | Whether this source is active (default `True`)                                                                                                                    |
 | `config`         | JSONField | Source-specific configuration                                                                                                                                     |
@@ -482,25 +482,25 @@ Per-team configuration for which signal sources are enabled.
 - The serializer exposes a computed `status` field:
   - `session_analysis_cluster` derives status from the Temporal clustering workflow
   - data-import-backed sources (`github`, `linear`, `zendesk`) derive status from `ExternalDataSchema`
-- The `signals_agent` source variant pairs with `source_type=cross_source_issue` and is the emission channel used by the headless Signals agent's `emit_signal_*` tools. It is the only `(source_product, source_type)` pair the agent emits today.
+- The `signals_scout` source variant pairs with `source_type=cross_source_issue` and is the emission channel used by the headless Signals scout's `emit_signal_*` tools. It is the only `(source_product, source_type)` pair the agent emits today.
 
 **Constraints:** Unique on `(team, source_product, source_type)`
 
-### `SignalAgentConfig`
+### `SignalScoutConfig`
 
-Per-team binding for the headless **Signals agent**. One row per team. The agent runs only for teams with `enabled=True`; fresh teams default to `shadow_mode=True` (findings persist on the run row, the emit adapter no-ops). See `backend/agent_harness/AGENTS.md` for the harness internals.
+Per-team binding for the headless **Signals scout**. One row per team. The agent runs only for teams with `enabled=True`; fresh teams default to `shadow_mode=True` (findings persist on the run row, the emit adapter no-ops). See `backend/scout_harness/AGENTS.md` for the harness internals.
 
 | Field                 | Type                  | Description                                                                                                                                                                                                                                 |
 | --------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `team`                | OneToOne → Team       | Owning team (`related_name="signal_agent_config"`)                                                                                                                                                                                          |
+| `team`                | OneToOne → Team       | Owning team (`related_name="signal_scout_config"`)                                                                                                                                                                                          |
 | `enabled`             | Boolean               | Master switch for the team; defaults `False`                                                                                                                                                                                                |
-| `shadow_mode`         | Boolean               | When `True`, runs persist findings on `SignalAgentRun.findings` but the emit adapter no-ops. Defaults `True` so a freshly-bound team starts in shadow.                                                                                      |
-| `enabled_skill_names` | ArrayField (nullable) | `null` = run all `signals-agent-*` skills the team has. A list narrows the candidate pool; coordinator still intersects with what's actually present on the team's `LLMSkill` rows.                                                         |
-| `runs_per_tick`       | PositiveSmallInt      | How many `signals-agent-*` skills to fan out per coordinator tick. Sampled without replacement from the candidate pool. Default `1`. `0` = soft-pause (team stays `enabled=True`, contributes no runs that tick). Validated `0 <= N <= 50`. |
+| `shadow_mode`         | Boolean               | When `True`, runs persist findings on `SignalScoutRun.findings` but the emit adapter no-ops. Defaults `True` so a freshly-bound team starts in shadow.                                                                                      |
+| `enabled_skill_names` | ArrayField (nullable) | `null` = run all `signals-scout-*` skills the team has. A list narrows the candidate pool; coordinator still intersects with what's actually present on the team's `LLMSkill` rows.                                                         |
+| `runs_per_tick`       | PositiveSmallInt      | How many `signals-scout-*` skills to fan out per coordinator tick. Sampled without replacement from the candidate pool. Default `1`. `0` = soft-pause (team stays `enabled=True`, contributes no runs that tick). Validated `0 <= N <= 50`. |
 | `limit_overrides`     | JSONField             | Per-team overrides for harness `RunLimits` (`max_runtime_s`, `max_findings`, …). Unset keys fall back to harness defaults; unrecognised keys are ignored.                                                                                   |
 | `created_by`          | FK → User (nullable)  | Audit pointer                                                                                                                                                                                                                               |
 
-### `SignalAgentRun`
+### `SignalScoutRun`
 
 Thin bridge from a Tasks `TaskRun` to the scout skill that ran inside it. Mirrors `SignalReportTask` (the bridge used by the SignalReport research flow): one scout-domain row per scheduled agent run that links its `TaskRun` to the skill it executed. Status, timing, error context, and the full chat log live on the `TaskRun`; emitted findings are `Signal` / `SignalReport` rows written by `emit_signal()`. This row carries only the scout-specific fields that need to be queryable as real columns.
 
@@ -522,7 +522,7 @@ Thin bridge from a Tasks `TaskRun` to the scout skill that ran inside it. Mirror
 
 **Constraints:** None at the DB level today. Single-flight is a best-effort app-layer guard (`_has_running_run` against `task_run.status = IN_PROGRESS`). An earlier partial unique constraint on `(team, skill_name) WHERE status='running'` was dropped together with the bridge model's own status column; a `task_run.status`-based constraint plus active recovery of stranded `IN_PROGRESS` task runs (`_self_heal_stale_runs` is a no-op today) is a tracked follow-up.
 
-### `SignalMemory`
+### `SignalScratchpad`
 
 Narrow per-team scratchpad surface the scout fleet writes during runs and reads back on future runs (known issues, false positives, dedupe fingerprints, learned team quirks). Distinct from `SignalProjectProfile`: profile is _deterministic ground truth_, scratchpad is the _scout's inferred learnings_ (possibly wrong). MCP-readable across agents so PostHog AI and other scouts can see what the fleet has learned about a team.
 
@@ -541,7 +541,7 @@ Narrow per-team scratchpad surface the scout fleet writes during runs and reads 
 
 ### `SignalProjectProfile`
 
-Deterministic snapshot of "what's true about this project" — the agent's orientation surface. Time-series so future phases can diff a new profile against the previous row to populate `payload.deltas`. Computed by `agent_harness/profile/builders.py` from authoritative tables; v1 writes 10 inventory sections (events, properties, cohorts, feature flags, experiments, surveys, dashboards, insights, data warehouse sources, integrations).
+Deterministic snapshot of "what's true about this project" — the agent's orientation surface. Time-series so future phases can diff a new profile against the previous row to populate `payload.deltas`. Computed by `scout_harness/profile/builders.py` from authoritative tables; v1 writes 10 inventory sections (events, properties, cohorts, feature flags, experiments, surveys, dashboards, insights, data warehouse sources, integrations).
 
 | Field            | Type          | Description                                                                                                                                               |
 | ---------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -775,39 +775,39 @@ View + control API for the v2 grouping pipeline. Uses scope object `INTERNAL`.
 | PUT    | `signals/processing/pause/` | Pause grouping until a given timestamp |
 | DELETE | `signals/processing/pause/` | Clear the paused state                 |
 
-#### Signals Agent endpoints (`backend/agent_harness/views.py`)
+#### Signals scout endpoints (`backend/scout_harness/views.py`)
 
-The harness exposes three viewsets routed under `environment_signals_agent_*` basenames in `posthog/api/__init__.py`. They are surfaced to MCP callers as `signals-agent-*` tools via `products/signals/mcp/tools.yaml`. Reads are scoped to the team; writes (memory create / delete, run findings create) require the matching MCP scope.
+The harness exposes three viewsets routed under `environment_signals_scout_*` basenames in `posthog/api/__init__.py`. They are surfaced to MCP callers as `signals-scout-*` tools via `products/signals/mcp/tools.yaml`. Reads are scoped to the team; writes (memory create / delete, run findings create) require the matching MCP scope.
 
-- **`SignalAgentRunViewSet`** — list / retrieve scout run rows; nested action `runs/{id}/findings/` for the harness to push findings during a run.
-- **`SignalMemoryViewSet`** — list / create / delete `SignalMemory` rows for the team. The `signals-agent-memory-list` tool is the agent's primary "what do I already know" read at prompt-assembly time.
+- **`SignalScoutRunViewSet`** — list / retrieve scout run rows; nested action `runs/{id}/findings/` for the harness to push findings during a run.
+- **`SignalScratchpadViewSet`** — list / create / delete `SignalScratchpad` rows for the team. The `signals-scout-scratchpad-list` tool is the agent's primary "what do I already know" read at prompt-assembly time.
 - **`SignalProjectProfileViewSet`** — `GET .../current/` returns the freshest non-expired `SignalProjectProfile` row for the team (recomputes if the cache is stale).
 
-Generated MCP tool names (all gated by the `signals-agent` rollout flag — see "Rollout & feature flags" below):
+Generated MCP tool names (all gated by the `signals-scout` rollout flag — see "Rollout & feature flags" below):
 
 | Tool                                 | Purpose                                                                        |
 | ------------------------------------ | ------------------------------------------------------------------------------ |
-| `signals-agent-runs-list`            | List scout runs (filterable by skill / status / time)                          |
-| `signals-agent-runs-retrieve`        | Fetch a single run row including the full findings payload                     |
-| `signals-agent-runs-findings-create` | Push a finding from inside a run (used by the harness's `emit_signal_*` tools) |
-| `signals-agent-memory-list`          | List durable memory entries for the team                                       |
-| `signals-agent-memory-create`        | Create or update a memory entry                                                |
-| `signals-agent-memory-delete`        | Remove a memory entry                                                          |
-| `signals-agent-project-profile-get`  | Read the current `SignalProjectProfile` snapshot                               |
+| `signals-scout-runs-list`            | List scout runs (filterable by skill / status / time)                          |
+| `signals-scout-runs-retrieve`        | Fetch a single run row including the full findings payload                     |
+| `signals-scout-runs-findings-create` | Push a finding from inside a run (used by the harness's `emit_signal_*` tools) |
+| `signals-scout-scratchpad-list`      | List durable memory entries for the team                                       |
+| `signals-scout-scratchpad-create`    | Create or update a memory entry                                                |
+| `signals-scout-scratchpad-delete`    | Remove a memory entry                                                          |
+| `signals-scout-project-profile-get`  | Read the current `SignalProjectProfile` snapshot                               |
 
 #### Rollout & feature flags
 
-The headless agent's rollout surface is gated by a single PostHog feature flag, **`signals-agent`**, evaluated in two contexts:
+The headless agent's rollout surface is gated by a single PostHog feature flag, **`signals-scout`**, evaluated in two contexts:
 
-1. **Runtime (per-team).** `agent_harness/feature_flags.team_passes_rollout_flag(team)` is invoked by:
-   - `agent_coordinator._collect_planned_runs` — flag-off teams are dropped from the per-tick fan-out before `sync_canonical_skills` runs, so a flag flip-off cleanly drains within one tick (no new runs scheduled, no canonical skill writes to non-flagged teams).
-   - The `sync_signals_agent_skills` management command — same gate; pass `--force` to bypass for emergency reverts (e.g. pushing a fixed canonical to every team regardless of rollout state).
+1. **Runtime (per-team).** `scout_harness/feature_flags.team_passes_rollout_flag(team)` is invoked by:
+   - `scout_coordinator._collect_planned_runs` — flag-off teams are dropped from the per-tick fan-out before `sync_canonical_skills` runs, so a flag flip-off cleanly drains within one tick (no new runs scheduled, no canonical skill writes to non-flagged teams).
+   - The `sync_signals_scout_skills` management command — same gate; pass `--force` to bypass for emergency reverts (e.g. pushing a fixed canonical to every team regardless of rollout state).
 
    Flag eval uses `groups={"organization": ..., "project": ...}` with `only_evaluate_locally=True`, so the gate doesn't add an HTTP roundtrip on the hot path. Eval failures fail closed (return `False`) — a momentary PostHog-flags outage will never silently let through teams the operator hasn't enrolled.
 
-2. **MCP tool surface (per-user).** Each of the seven `signals-agent-*` MCP tools declares `feature_flag: signals-agent` in `products/signals/mcp/tools.yaml`. The MCP server (`services/mcp/src/lib/analytics.ts:resolveToolFeatureFlags`) batch-evaluates the flag at session init on the requesting user's distinct_id and filters the tool out of the surface unless the flag evaluates true for that user. Targeting is user-property based (e.g. internal-user property).
+2. **MCP tool surface (per-user).** Each of the seven `signals-scout-*` MCP tools declares `feature_flag: signals-scout` in `products/signals/mcp/tools.yaml`. The MCP server (`services/mcp/src/lib/analytics.ts:resolveToolFeatureFlags`) batch-evaluates the flag at session init on the requesting user's distinct_id and filters the tool out of the surface unless the flag evaluates true for that user. Targeting is user-property based (e.g. internal-user property).
 
-The flag sits **above** the existing static gates on `SignalAgentConfig` (`enabled`, `shadow_mode`). A team must be both flagged and configured-enabled to contribute runs; the flag is the dynamic dial, the config is the per-team master switch + emit posture. The Temporal schedule itself is _not_ flag-gated — when no team passes the flag, the coordinator activity returns 0 planned runs and exits in seconds; no defense-in-depth bootstrap-time switch is needed.
+The flag sits **above** the existing static gates on `SignalScoutConfig` (`enabled`, `shadow_mode`). A team must be both flagged and configured-enabled to contribute runs; the flag is the dynamic dial, the config is the per-team master switch + emit posture. The Temporal schedule itself is _not_ flag-gated — when no team passes the flag, the coordinator activity returns 0 planned runs and exits in seconds; no defense-in-depth bootstrap-time switch is needed.
 
 A single flag covers both contexts because the dashboard rollout strategy composes naturally on one key (project-group condition OR user-property condition). Splitting into per-gate flags adds dashboards without buying real flexibility — if a single gate needs to lag during rollout, that's a flag-condition tweak, not a separate flag.
 
@@ -1075,10 +1075,10 @@ Signal {index}:
 | `BUFFER_MAX_SIZE`                 | `20`                          | Max signals buffered in memory before flush to S3                                    |
 | `BUFFER_FLUSH_TIMEOUT_SECONDS`    | `5`                           | Max seconds to wait for buffer to fill before flushing                               |
 | S3 prefix                         | `signals/signal_batches/`     | Object storage path for signal batch files (cleaned up by S3 lifecycle policies)     |
-| `COORDINATOR_INTERVAL_MINUTES`    | `60`                          | Signals agent coordinator tick cadence (Temporal schedule, `SKIP` overlap policy)    |
+| `COORDINATOR_INTERVAL_MINUTES`    | `60`                          | Signals scout coordinator tick cadence (Temporal schedule, `SKIP` overlap policy)    |
 | `MAX_RUNS_PER_TICK`               | `50`                          | Hard cap on planned runs per coordinator tick (truncated after sort)                 |
-| `SignalAgentConfig.runs_per_tick` | `1`                           | Per-team default for how many `signals-agent-*` skills to sample per tick (`0`–`50`) |
-| `SignalAgentConfig.shadow_mode`   | `True`                        | Default for fresh teams — findings persist on the run row, emit adapter no-ops       |
+| `SignalScoutConfig.runs_per_tick` | `1`                           | Per-team default for how many `signals-scout-*` skills to sample per tick (`0`–`50`) |
+| `SignalScoutConfig.shadow_mode`   | `True`                        | Default for fresh teams — findings persist on the run row, emit adapter no-ops       |
 
 ---
 
@@ -1091,11 +1091,11 @@ products/signals/
 │   ├── admin.py                     # Django admin for SignalReport + SignalReportArtefact
 │   ├── api.py                       # emit_signal() entry point + source/org guards
 │   ├── apps.py                      # Django app config
-│   ├── models.py                    # SignalReport, SignalReportArtefact, SignalTeamConfig, SignalUserAutonomyConfig, SignalReportTask, SignalSourceConfig, SignalAgentConfig, SignalAgentRun, SignalMemory, SignalProjectProfile, SignalEmissionRecord
+│   ├── models.py                    # SignalReport, SignalReportArtefact, SignalTeamConfig, SignalUserAutonomyConfig, SignalReportTask, SignalSourceConfig, SignalScoutConfig, SignalScoutRun, SignalScratchpad, SignalProjectProfile, SignalEmissionRecord
 │   ├── serializers.py               # DRF serializers for source configs, reports, artefacts, team config, user autonomy config, report tasks
 │   ├── utils.py                     # Compatibility re-exports for signal query helpers
 │   ├── views.py                     # SignalViewSet, InternalSignalViewSet, SignalSourceConfigViewSet, SignalTeamConfigViewSet, SignalReportViewSet, SignalReportTaskViewSet, SignalProcessingViewSet
-│   ├── agent_harness/               # Headless Signals agent — see agent_harness/AGENTS.md
+│   ├── scout_harness/               # Headless Signals scout — see scout_harness/AGENTS.md
 │   │   ├── AGENTS.md
 │   │   ├── __init__.py              # Public re-exports (RunLimits, LoadedSkill, sync helpers, …)
 │   │   ├── runner.py                # Per-run entrypoint; owns SignalScoutRun lifecycle + sandbox loop
@@ -1112,7 +1112,7 @@ products/signals/
 │   │       ├── emit.py              # emit_signal_* — pushes findings as cross_source_issue signals
 │   │       ├── scratchpad.py        # remember / forget / search_scratchpad — read/write/delete SignalScratchpad
 │   │       ├── profile.py           # project_profile_* — read SignalProjectProfile snapshot
-│   │       └── runs.py              # runs_* — read past SignalAgentRun rows for dedupe
+│   │       └── runs.py              # runs_* — read past SignalScoutRun rows for dedupe
 │   ├── github_issues/               # Placeholder directory
 │   ├── management/
 │   │   ├── AGENTS.md
@@ -1128,11 +1128,11 @@ products/signals/
 │   │       ├── list_signal_reports.py
 │   │       ├── parse_sandbox_log.py
 │   │       ├── reingest_team_signals.py   # Starts TeamSignalReingestionWorkflow for a team
-│   │       ├── run_signals_agent.py       # One-shot scout run; bypasses the coordinator
+│   │       ├── run_signals_scout.py       # One-shot scout run; bypasses the coordinator
 │   │       ├── select_repo.py
 │   │       ├── signal_pipeline_status.py
 │   │       ├── summarize_single_session.py
-│   │       └── sync_signals_agent_skills.py  # Force a canonical SKILL.md sync to LLMSkill rows
+│   │       └── sync_signals_scout_skills.py  # Force a canonical SKILL.md sync to LLMSkill rows
 │   ├── report_generation/
 │   │   ├── AGENTS.md                # Documentation for the agentic report generation flow
 │   │   ├── research.py              # Multi-turn sandbox research orchestration + output schemas + SignalReportTask(RESEARCH) creation
@@ -1173,8 +1173,8 @@ products/signals/
 │       ├── __init__.py              # Registers Signals workflows and activities
 │       ├── agentic/
 │       │   ├── __init__.py          # Sandbox env / user-resolution helpers
-│       │   ├── agent_coordinator.py # SignalsAgentCoordinatorWorkflow + per-tick sampling activity
-│       │   ├── agent_scheduler.py   # RunSignalsAgentWorkflow + run_signals_agent_activity
+│       │   ├── scout_coordinator.py # SignalsScoutCoordinatorWorkflow + per-tick sampling activity
+│       │   ├── scout_scheduler.py   # RunSignalsScoutWorkflow + run_signals_scout_activity
 │       │   ├── schedule.py          # Temporal Schedule definition (cadence + SKIP overlap policy)
 │       │   ├── report.py            # Agentic report activity + artefact persistence
 │       │   └── select_repository.py # Repository selection activity
