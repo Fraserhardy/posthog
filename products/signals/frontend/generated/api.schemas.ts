@@ -282,8 +282,28 @@ export interface ProjectProfileInventoryApi {
     signal_source_configs: SignalSourceConfigsBucketsApi
     /** Counts of reports already in the inbox, grouped by status. */
     existing_inbox_reports: ExistingInboxReportsApi
+    /** Per-scope counts off the activity log over the recent-activity window — cross-cutting orientation across every entity type (surveys, feature flags, experiments, dashboards, insights, cohorts, notebooks, actions, etc.). Each scope reports `edits` (total log entries), `users` (distinct user count), and `last_edit` (ISO-8601). Use to triage which scope a team has been working in lately before drilling down via the per-entity readers or `activity-log-list`. */
+    recent_activity: unknown
     /** Up to 20 dashboards on this team sorted by `last_accessed_at` desc — what the team is currently looking at, not necessarily the most-trafficked. We don't have per-dashboard view counts in Postgres, only the timestamp of the most recent access. */
     recent_dashboards: RecentDashboardEntryApi[]
+    /** Surveys orientation: `{total_count, active_count, recent: [...]}` where `recent` is the 5 most recently updated surveys with `id`, `name`, `type`, `status` (draft / running / stopped / archived), and `updated_at`. */
+    recent_surveys: unknown
+    /** Feature flag orientation: `{total_count, active_count, recent: [...]}` where `recent` is the 5 most recently updated non-deleted flags with `id`, `key`, `name`, `active`, and `updated_at`. */
+    recent_feature_flags: unknown
+    /** Experiment orientation: `{total_count, active_count, recent: [...]}`. The feature_flag key on each row lets the scout correlate experiments with the `recent_feature_flags` section. */
+    recent_experiments: unknown
+    /** Alert orientation: `{total_count, active_count, recent: [...]}` covering the 5 most recently updated alerts with their state and threshold metadata. */
+    recent_alerts: unknown
+    /** Hog function orientation: `{total_count, active_count, recent: [...]}` for destinations / transformations the team has wired up via the CDP pipelines. */
+    recent_hog_functions: unknown
+    /** Hog flow orientation: `{total_count, active_count, recent: [...]}` for the team's currently configured automation flows. */
+    recent_hog_flows: unknown
+    /** Notebook orientation: `{total_count, recent: [...]}` with the 5 most recently updated notebooks — useful signal for what the team has been investigating. */
+    recent_notebooks: unknown
+    /** Cohort orientation: `{total_count, recent: [...]}` with the 5 most recently updated cohorts on the team. */
+    recent_cohorts: unknown
+    /** Action orientation: `{total_count, recent: [...]}` with the 5 most recently updated actions — useful to anchor agent reasoning about what the team treats as a meaningful interaction. */
+    recent_actions: unknown
     /**
      * Top ~50 events by count over the last 7 days, with first/last seen timestamps within the window. `null` if the underlying ClickHouse query failed or timed out (distinct from `[]`, which means the team has no captures in the window). Use the gap between `first_seen` and `now` to spot new event types or recent bursts.
      * @nullable
@@ -325,82 +345,102 @@ export interface ProjectProfileApi {
 
 /**
  * Lightweight projection of a `SignalScoutRun` row used by `search-recent-runs`.
-
-Status and timestamps flow from the linked `tasks.TaskRun`.
  */
 export interface SignalScoutRunSummaryApi {
-    /** UUID of the bridge row. */
+    /** UUID of the run row. */
     run_id: string
     /** Canonical skill name the run executed (e.g. `signals-scout-general`). */
     skill_name: string
     /** Skill version snapshotted at run start. */
     skill_version: number
-    /** Status from the linked TaskRun: not_started | queued | in_progress | completed | failed | cancelled. */
+    /** Run status: scheduled | running | completed | failed | abandoned. */
     status: string
-    /** ISO-8601 timestamp the TaskRun was created. */
+    /** ISO-8601 timestamp the run row was inserted. */
     started_at: string
     /**
-     * ISO-8601 timestamp the TaskRun completed; null while still running.
+     * ISO-8601 timestamp the run finalized; null while still running.
      * @nullable
      */
     completed_at: string | null
+    /** Prose: what this run looked at, found, and skipped. ILIKE search target for dedupe. */
+    summary: string
+    /** Number of finding entries persisted on the run row. */
+    findings_count: number
     /**
-     * UUID of the Tasks `Task` the scout span ran inside.
+     * UUID of the Tasks `Task` the harness span ran inside. Null on aborted rows or rows older than the linkage capture.
      * @nullable
      */
     task_id?: string | null
     /**
-     * UUID of the Tasks `TaskRun`. Pairs with `task_id` to deep-link.
+     * UUID of the Tasks `TaskRun` (the specific execution of the task). Pairs with `task_id` to deep-link.
      * @nullable
      */
     task_run_id?: string | null
     /**
-     * Relative deep-link to the Tasks UI for this run, e.g. `/project/{team_id}/tasks/{task_id}?runId={task_run_id}`.
+     * Relative deep-link to the Tasks UI for this run, e.g. `/project/{team_id}/tasks/{task_id}?runId={task_run_id}`. Null when either `task_id` or `task_run_id` is missing.
      * @nullable
      */
     task_url?: string | null
-    /** One-paragraph close-out the scout wrote at end-of-run. Empty string for runs that errored before close-out. The dedupe key for non-emitting runs. */
-    summary: string
 }
 
+export type SignalScoutRunDetailApiFindingsItem = { [key: string]: unknown }
+
+export type SignalScoutRunDetailApiHypothesesConsideredItem = { [key: string]: unknown }
+
 /**
- * Full `SignalScoutRun` projection used by `get-run`. Same shape as the summary
-today; kept distinct so future detail-only extensions (linked Signal rows,
-LLMA token-cost join) can land here without bloating the list response.
+ * Measured quantities about how the run went, e.g. {runtime_s, findings}.
+ */
+export type SignalScoutRunDetailApiRunMetrics = { [key: string]: number }
+
+/**
+ * Run metadata snapshot (limits, skill id, allowed_tools resolution, plus `task_id` / `task_run_id` for the Tasks UI cross-link).
+ */
+export type SignalScoutRunDetailApiMetadata = { [key: string]: unknown }
+
+/**
+ * Full `SignalScoutRun` projection used by `get-run`. Includes structured payloads.
  */
 export interface SignalScoutRunDetailApi {
-    /** UUID of the bridge row. */
+    /** UUID of the run row. */
     run_id: string
-    /** Canonical skill name the run executed (e.g. `signals-scout-general`). */
+    /** Canonical skill name the run executed. */
     skill_name: string
     /** Skill version snapshotted at run start. */
     skill_version: number
-    /** Status from the linked TaskRun: not_started | queued | in_progress | completed | failed | cancelled. */
+    /** Run status. */
     status: string
-    /** ISO-8601 timestamp the TaskRun was created. */
+    /** ISO-8601 timestamp the run row was inserted. */
     started_at: string
     /**
-     * ISO-8601 timestamp the TaskRun completed; null while still running.
+     * ISO-8601 timestamp the run finalized.
      * @nullable
      */
     completed_at: string | null
+    /** Prose summary of the run. */
+    summary: string
+    /** Findings persisted to the run row, including pre-emit attribution. */
+    findings: SignalScoutRunDetailApiFindingsItem[]
+    /** Hypotheses the run considered, including ones it explicitly skipped. */
+    hypotheses_considered: SignalScoutRunDetailApiHypothesesConsideredItem[]
+    /** Measured quantities about how the run went, e.g. {runtime_s, findings}. */
+    run_metrics: SignalScoutRunDetailApiRunMetrics
+    /** Run metadata snapshot (limits, skill id, allowed_tools resolution, plus `task_id` / `task_run_id` for the Tasks UI cross-link). */
+    metadata: SignalScoutRunDetailApiMetadata
     /**
-     * UUID of the Tasks `Task` the scout span ran inside.
+     * UUID of the Tasks `Task` the harness span ran inside. Null on aborted rows or rows older than the linkage capture.
      * @nullable
      */
     task_id?: string | null
     /**
-     * UUID of the Tasks `TaskRun`. Pairs with `task_id` to deep-link.
+     * UUID of the Tasks `TaskRun` (the specific execution of the task). Pairs with `task_id` to deep-link.
      * @nullable
      */
     task_run_id?: string | null
     /**
-     * Relative deep-link to the Tasks UI for this run, e.g. `/project/{team_id}/tasks/{task_id}?runId={task_run_id}`.
+     * Relative deep-link to the Tasks UI for this run, e.g. `/project/{team_id}/tasks/{task_id}?runId={task_run_id}`. Null when either `task_id` or `task_run_id` is missing.
      * @nullable
      */
     task_url?: string | null
-    /** One-paragraph close-out the scout wrote at end-of-run. Empty string for runs that errored before close-out. The dedupe key for non-emitting runs. */
-    summary: string
 }
 
 /**
@@ -417,23 +457,6 @@ export interface EvidenceEntryApi {
      */
     entity_id?: string | null
 }
-
-/**
- * * `P0` - P0
- * `P1` - P1
- * `P2` - P2
- * `P3` - P3
- * `P4` - P4
- */
-export type AutonomyPriorityEnumApi = (typeof AutonomyPriorityEnumApi)[keyof typeof AutonomyPriorityEnumApi]
-
-export const AutonomyPriorityEnumApi = {
-    P0: 'P0',
-    P1: 'P1',
-    P2: 'P2',
-    P3: 'P3',
-    P4: 'P4',
-} as const
 
 export interface TimeRangeApi {
     /** ISO-8601 inclusive lower bound for the finding's window. */
@@ -470,14 +493,11 @@ export interface EmitFindingRequestApi {
      * @nullable
      */
     hypothesis?: string | null
-    /** Optional severity tag — one of P0, P1, P2, P3, P4. Informational only.
-
-  * `P0` - P0
-  * `P1` - P1
-  * `P2` - P2
-  * `P3` - P3
-  * `P4` - P4 */
-    severity?: AutonomyPriorityEnumApi | null
+    /**
+     * Optional severity tag (`P0`-`P4`) — informational only.
+     * @nullable
+     */
+    severity?: string | null
     /** Optional keys for downstream dedupe (e.g. `error_tracking_issue:<id>`). */
     dedupe_keys?: string[]
     /** Optional time window the finding refers to. */
@@ -488,7 +508,7 @@ export interface EmitFindingRequestApi {
      */
     mcp_trace_id?: string | null
     /**
-     * Stable id for this finding, baked into the signal's source_id for traceability. NOT a dedupe key — re-emitting the same id creates another signal.
+     * Idempotency key. Re-using the same id within a run short-circuits without re-emitting.
      * @nullable
      */
     finding_id?: string | null
@@ -500,7 +520,7 @@ export interface EmitFindingResponseApi {
     /** Whether `emit_signal` was actually fired. */
     emitted: boolean
     /**
-     * `ai_processing_not_approved` | `source_disabled` | null when emitted normally.
+     * `shadow_mode` | `already_emitted` | null when emitted normally.
      * @nullable
      */
     skipped_reason: string | null
@@ -514,6 +534,10 @@ export interface ScratchpadEntryApi {
     key: string
     /** Prose content for prompt injection. */
     content: string
+    /** Always `agent_inference` in v1; reserved for future human-confirmed entries. */
+    authority: string
+    /** Free-form tags the agent uses to scope search; matched via Postgres array overlap. */
+    tags: string[]
     /**
      * ISO-8601 creation timestamp.
      * @nullable
@@ -525,6 +549,11 @@ export interface ScratchpadEntryApi {
      */
     updated_at: string | null
     /**
+     * ISO-8601 expiry timestamp (null = no expiry, reserved for future use).
+     * @nullable
+     */
+    expires_at: string | null
+    /**
      * Run that wrote this entry, or null if human-authored.
      * @nullable
      */
@@ -532,7 +561,7 @@ export interface ScratchpadEntryApi {
 }
 
 /**
- * Request body for `remember`.
+ * Request body for `remember`. Authority is always `agent_inference` — humans use Django admin.
  */
 export interface RememberRequestApi {
     /**
@@ -542,6 +571,14 @@ export interface RememberRequestApi {
     key: string
     /** Prose to write. Read verbatim into future prompts. */
     content: string
+    /** Tags for later search. Empty/whitespace tags are dropped. */
+    tags?: string[]
+    /**
+     * Days until expiry (default 7, hard cap 90).
+     * @minimum 1
+     * @maximum 90
+     */
+    ttl_days?: number
     /**
      * Run that authored this memory; persisted as `created_by_run_id` for lineage. Must reference a run on this same project — cross-project run UUIDs are rejected.
      * @nullable
@@ -550,7 +587,7 @@ export interface RememberRequestApi {
 }
 
 /**
- * Request body for `forget`.
+ * Request body for `forget`. Only `agent_inference` keys can be deleted.
  */
 export interface ForgetRequestApi {
     /**
@@ -655,6 +692,23 @@ export interface _UserApi {
     readonly email: string
 }
 
+/**
+ * * `P0` - P0
+ * `P1` - P1
+ * `P2` - P2
+ * `P3` - P3
+ * `P4` - P4
+ */
+export type AutostartPriorityEnumApi = (typeof AutostartPriorityEnumApi)[keyof typeof AutostartPriorityEnumApi]
+
+export const AutostartPriorityEnumApi = {
+    P0: 'P0',
+    P1: 'P1',
+    P2: 'P2',
+    P3: 'P3',
+    P4: 'P4',
+} as const
+
 export type BlankEnumApi = (typeof BlankEnumApi)[keyof typeof BlankEnumApi]
 
 export const BlankEnumApi = {
@@ -664,26 +718,7 @@ export const BlankEnumApi = {
 export interface SignalUserAutonomyConfigApi {
     readonly id: string
     readonly user: _UserApi
-    autostart_priority?: AutonomyPriorityEnumApi | BlankEnumApi | null
-    /**
-     * ID of the Slack Integration to deliver inbox-item notifications through, or null when notifications are disabled.
-     * @nullable
-     */
-    readonly slack_notification_integration_id: number | null
-    /**
-     * Slack channel target in the same `channel_id|#channel-name` shape PostHog uses elsewhere (only the channel id is required). Null disables Slack notifications.
-     * @maxLength 255
-     * @nullable
-     */
-    slack_notification_channel?: string | null
-    /** Minimum report priority that triggers a Slack notification. P0 is highest. Null means notify on every priority (and reports without a priority judgment).
-
-  * `P0` - P0
-  * `P1` - P1
-  * `P2` - P2
-  * `P3` - P3
-  * `P4` - P4 */
-    slack_notification_min_priority?: AutonomyPriorityEnumApi | BlankEnumApi | null
+    autostart_priority?: AutostartPriorityEnumApi | BlankEnumApi | null
     readonly created_at: string
     readonly updated_at: string
 }
@@ -730,15 +765,14 @@ export type SignalsReportsListParams = {
     suggested_reviewers?: string
 }
 
+export type SignalsScoutProjectProfileGetParams = {
+    /**
+     * When true, skip the cache and rebuild the profile from authoritative sources before responding. Use after seeding events, importing data, or any other change the caller knows just landed but hasn't surfaced through natural cache expiry yet. Concurrent forced rebuilds are still serialized by the team-keyed advisory lock — at most one extra `build_inventory` per simultaneous request.
+     */
+    force_refresh?: boolean
+}
+
 export type SignalsScoutRunsListParams = {
-    /**
-     * ISO-8601 inclusive lower bound on `created_at`. Omit to skip the lower bound.
-     */
-    date_from?: string
-    /**
-     * ISO-8601 exclusive upper bound on `created_at`. Pass to walk back past the result cap on subsequent calls (cursor-style: set to the `started_at` of the oldest run from the prior page).
-     */
-    date_to?: string
     /**
      * Max rows to return (default 20, hard cap 100).
      * @minimum 1
@@ -746,19 +780,30 @@ export type SignalsScoutRunsListParams = {
      */
     limit?: number
     /**
-     * Case-insensitive substring match on the scout's end-of-run `summary`. Omit to skip the filter.
-     * @minLength 1
+     * ISO-8601 lower bound on `started_at`. Use to scope to a recent window.
+     */
+    since?: string
+    /**
+     * ILIKE substring match against `summary`. Omit to return the latest runs unfiltered.
      */
     text?: string
 }
 
-export type SignalsScoutScratchpadSearchParams = {
+export type SignalsScoutScratchpadListParams = {
+    /**
+     * Include expired `agent_inference` entries (default false). Use for audit/debug only.
+     */
+    include_expired?: boolean
     /**
      * Max rows to return (default 20, hard cap 100).
      * @minimum 1
      * @maximum 100
      */
     limit?: number
+    /**
+     * Tags filtered via Postgres array overlap. Pass repeated `tags=` query params to filter.
+     */
+    tags?: string[]
     /**
      * ILIKE substring match against `content`. Omit to return the most recent entries.
      */

@@ -205,7 +205,7 @@ export const SignalsScoutEmitSignalBody = /* @__PURE__ */ zod
  * Return `SignalScratchpad` entries for this project. ILIKE matches on `content`; tags filter via Postgres array overlap. Expired `agent_inference` entries are hidden by default.
  * @summary Search durable memories
  */
-export const SignalsScoutScratchpadSearchParams = /* @__PURE__ */ zod.object({
+export const SignalsScoutScratchpadListParams = /* @__PURE__ */ zod.object({
     project_id: zod
         .string()
         .describe(
@@ -213,7 +213,7 @@ export const SignalsScoutScratchpadSearchParams = /* @__PURE__ */ zod.object({
         ),
 })
 
-export const signalsScoutScratchpadSearchQueryLimitMax = 100
+export const signalsScoutScratchpadListQueryLimitMax = 100
 
 export const SignalsScoutScratchpadListQueryParams = /* @__PURE__ */ zod.object({
     include_expired: zod
@@ -223,7 +223,7 @@ export const SignalsScoutScratchpadListQueryParams = /* @__PURE__ */ zod.object(
     limit: zod
         .number()
         .min(1)
-        .max(signalsScoutScratchpadSearchQueryLimitMax)
+        .max(signalsScoutScratchpadListQueryLimitMax)
         .optional()
         .describe('Max rows to return (default 20, hard cap 100).'),
     tags: zod
@@ -240,7 +240,7 @@ export const SignalsScoutScratchpadListQueryParams = /* @__PURE__ */ zod.object(
  * Upsert an `agent_inference` memory keyed on `(team, key)`. Re-using a key updates the existing entry in place and resets its TTL. Cannot overwrite `human_confirmed` entries.
  * @summary Write or refresh an agent memory
  */
-export const SignalsScoutScratchpadRememberParams = /* @__PURE__ */ zod.object({
+export const SignalsScoutScratchpadCreateParams = /* @__PURE__ */ zod.object({
     project_id: zod
         .string()
         .describe(
@@ -248,7 +248,7 @@ export const SignalsScoutScratchpadRememberParams = /* @__PURE__ */ zod.object({
         ),
 })
 
-export const signalsScoutScratchpadRememberBodyKeyMax = 300
+export const signalsScoutScratchpadCreateBodyKeyMax = 300
 
 export const signalsScoutScratchpadCreateBodyTtlDaysMax = 90
 
@@ -256,7 +256,7 @@ export const SignalsScoutScratchpadCreateBody = /* @__PURE__ */ zod
     .object({
         key: zod
             .string()
-            .max(signalsScoutScratchpadRememberBodyKeyMax)
+            .max(signalsScoutScratchpadCreateBodyKeyMax)
             .describe('Agent-chosen semantic key. Re-using a key updates the existing entry in place.'),
         content: zod.string().describe('Prose to write. Read verbatim into future prompts.'),
         tags: zod.array(zod.string()).optional().describe('Tags for later search. Empty/whitespace tags are dropped.'),
@@ -279,7 +279,7 @@ export const SignalsScoutScratchpadCreateBody = /* @__PURE__ */ zod
  * Delete an `agent_inference` entry by key. Returns `deleted=false` if no row matched. Cannot delete `human_confirmed` entries — those are human-managed only.
  * @summary Delete an agent memory by key
  */
-export const SignalsScoutScratchpadForgetParams = /* @__PURE__ */ zod.object({
+export const SignalsScoutScratchpadDeleteParams = /* @__PURE__ */ zod.object({
     project_id: zod
         .string()
         .describe(
@@ -287,11 +287,11 @@ export const SignalsScoutScratchpadForgetParams = /* @__PURE__ */ zod.object({
         ),
 })
 
-export const signalsScoutScratchpadForgetBodyKeyMax = 300
+export const signalsScoutScratchpadDeleteBodyKeyMax = 300
 
-export const SignalsScoutScratchpadForgetBody = /* @__PURE__ */ zod
+export const SignalsScoutScratchpadDeleteBody = /* @__PURE__ */ zod
     .object({
-        key: zod.string().max(signalsScoutScratchpadForgetBodyKeyMax).describe('Memory key to delete.'),
+        key: zod.string().max(signalsScoutScratchpadDeleteBodyKeyMax).describe('Memory key to delete.'),
     })
     .describe('Request body for `forget`. Only `agent_inference` keys can be deleted.')
 
