@@ -11984,6 +11984,7 @@ export namespace Schemas {
     * `Plain` - Plain
     * `Resend` - Resend
     * `PgAnalyze` - PgAnalyze
+    * `Custom` - Custom
      */
     export type ExternalDataSourceTypeEnum = typeof ExternalDataSourceTypeEnum[keyof typeof ExternalDataSourceTypeEnum];
 
@@ -12134,6 +12135,7 @@ export namespace Schemas {
       Plain: 'Plain',
       Resend: 'Resend',
       PgAnalyze: 'PgAnalyze',
+      Custom: 'Custom',
     } as const;
 
     /**
@@ -12290,7 +12292,8 @@ export namespace Schemas {
       * `ClickHouse` - ClickHouse
       * `Plain` - Plain
       * `Resend` - Resend
-      * `PgAnalyze` - PgAnalyze */
+      * `PgAnalyze` - PgAnalyze
+      * `Custom` - Custom */
       source_type: ExternalDataSourceTypeEnum;
     }
 
@@ -16435,7 +16438,8 @@ export namespace Schemas {
       * `ClickHouse` - ClickHouse
       * `Plain` - Plain
       * `Resend` - Resend
-      * `PgAnalyze` - PgAnalyze */
+      * `PgAnalyze` - PgAnalyze
+      * `Custom` - Custom */
       source_type: ExternalDataSourceTypeEnum;
       /** Connection credentials and a 'schemas' array. Keys depend on source_type. */
       payload: ExternalDataSourceCreatePayload;
