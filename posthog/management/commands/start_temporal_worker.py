@@ -88,6 +88,10 @@ from posthog.temporal.mcp_analytics.backfill_sessions import (
     MCP_ANALYTICS_BACKFILL_SESSIONS_ACTIVITIES,
     MCP_ANALYTICS_BACKFILL_SESSIONS_WORKFLOWS,
 )
+from posthog.temporal.mcp_analytics.intent_clustering import (
+    MCP_ANALYTICS_INTENT_CLUSTERING_ACTIVITIES,
+    MCP_ANALYTICS_INTENT_CLUSTERING_WORKFLOWS,
+)
 from posthog.temporal.mcp_analytics.summarize_session_intents import (
     MCP_ANALYTICS_SUMMARIZE_SESSION_INTENTS_ACTIVITIES,
     MCP_ANALYTICS_SUMMARIZE_SESSION_INTENTS_WORKFLOWS,
@@ -350,6 +354,16 @@ _task_queue_specs = [
         settings.LLMA_TASK_QUEUE,
         LLM_ANALYTICS_WORKFLOWS,
         LLM_ANALYTICS_ACTIVITIES,
+    ),
+    (
+        # Dedicated queue for MCP analytics clustering — isolates the CPU
+        # burst (cluster compute) and external embedding worker calls from
+        # the general-purpose queue that hosts the rest of mcp_analytics.
+        # Workflow + activity lists are populated as the stack lands; an
+        # empty queue is harmless — the worker registers and idles.
+        settings.MCPA_TASK_QUEUE,
+        MCP_ANALYTICS_INTENT_CLUSTERING_WORKFLOWS,
+        MCP_ANALYTICS_INTENT_CLUSTERING_ACTIVITIES,
     ),
     (
         settings.EVENT_SCREENSHOTS_TASK_QUEUE,
