@@ -1291,6 +1291,16 @@ def ensure_iceberg_table_exists(
 
     The `iceberg` catalog is only attached when the org's warehouse has the
     Iceberg backend enabled (see lakekeeper-iceberg-catalog runbook in duckgres).
+
+    Deliberately UNPARTITIONED, unlike the DuckLake tables (which set
+    `year/month/day` partitioning via _set_table_partitioning). DuckDB only
+    gained INSERT support for *partitioned* Iceberg tables in 1.5.3, and even
+    then only for `truncate`/`bucket` transforms — not the `year/month/day`
+    transforms DuckLake uses. duckgres currently runs DuckDB 1.5.2, where an
+    INSERT into a partitioned Iceberg table errors out outright. Partitioning
+    this table on the current version would make every dual-write INSERT fail
+    (silently, since the path is best-effort) and leave Iceberg empty. Revisit
+    once workers are on 1.5.3+, and note the transform set differs from DuckLake.
     """
     _validate_identifier(table)
     try:
