@@ -271,10 +271,9 @@ def get_task_processing_context(input: GetTaskProcessingContextInput) -> TaskPro
     # picks a default (`User.pr_babysit_default`), and the per-task field
     # `Task.pr_babysit_enabled` overrides that default when not null. A later
     # `set_pr_loop` signal can flip the runtime value mid-run.
-    if task.pr_babysit_enabled is not None:
-        user_choice_enabled = task.pr_babysit_enabled
-    else:
-        user_choice_enabled = bool(task.created_by.pr_babysit_default)
+    user_choice_enabled = (
+        task.pr_babysit_enabled if task.pr_babysit_enabled is not None else task.created_by.pr_babysit_default
+    )
     pr_loop_enabled = pr_loop_flag_enabled and user_choice_enabled
     emit_agent_log(
         run_id,

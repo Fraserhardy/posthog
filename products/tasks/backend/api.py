@@ -1460,7 +1460,7 @@ class TaskRunViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         from products.tasks.backend.services.pr_loop import set_pr_loop_for_run
 
         task_run = cast(TaskRun, self.get_object())
-        enabled = bool(request.validated_data["enabled"])
+        enabled = request.validated_data["enabled"]
         task_run = set_pr_loop_for_run(task_run, enabled)
         return Response(TaskRunDetailSerializer(task_run, context=self.get_serializer_context()).data)
 

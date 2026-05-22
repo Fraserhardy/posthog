@@ -22,43 +22,35 @@ def set_pr_loop_for_run(task_run: TaskRun, enabled: bool) -> TaskRun:
     change immediately (and so the CI repetition counter resets when turning
     on, per product requirement).
 
-    Always persists state. Returns the refreshed TaskRun.
-    """
-    TaskRun.update_state_atomic(task_run.id, updates={"pr_babysit_enabled": enabled})
-    task_run.refresh_from_db()
-    if not task_run.is_terminal and task_run.workflow_id:
-        _signal_workflow_pr_loop(task_run, enabled)
-    task_run.publish_stream_state_event()
-    return task_run
-
-
-def _signal_workflow_pr_loop(task_run: TaskRun, enabled: bool) -> None:
-    """Send the `set_pr_loop` Temporal signal to the running workflow.
-
-    Failures are logged but never raised — the DB state has already been
-    persisted, and a workflow that just terminated between our `is_terminal`
-    check and the signal call is a benign race (the next run will read the
-    persisted state).
+    Always persists state. Signal failures are logged but never raised — the
+    DB state has already been persisted, and a workflow that just terminated
+    between our `is_terminal` check and the signal call is a benign race (the
+    next run will read the persisted state). Returns the refreshed TaskRun.
     """
     from posthog.temporal.common.client import sync_connect
 
     from products.tasks.backend.temporal.process_task.workflow import ProcessTaskWorkflow
 
-    try:
-        client = sync_connect()
-        handle = client.get_workflow_handle(task_run.workflow_id)
-        asyncio.run(handle.signal(ProcessTaskWorkflow.set_pr_loop, enabled))
-        logger.info(
-            "set_pr_loop_signal_sent",
-            run_id=str(task_run.id),
-            workflow_id=task_run.workflow_id,
-            enabled=enabled,
-        )
-    except Exception as e:
-        logger.warning(
-            "set_pr_loop_signal_failed",
-            run_id=str(task_run.id),
-            workflow_id=task_run.workflow_id,
-            enabled=enabled,
-            error=str(e),
-        )
+    TaskRun.update_state_atomic(task_run.id, updates={"pr_babysit_enabled": enabled})
+    task_run.refresh_from_db()
+    if not task_run.is_terminal and task_run.workflow_id:
+        try:
+            client = sync_connect()
+            handle = client.get_workflow_handle(task_run.workflow_id)
+            asyncio.run(handle.signal(ProcessTaskWorkflow.set_pr_loop, enabled))
+            logger.info(
+                "set_pr_loop_signal_sent",
+                run_id=str(task_run.id),
+                workflow_id=task_run.workflow_id,
+                enabled=enabled,
+            )
+        except Exception as e:
+            logger.warning(
+                "set_pr_loop_signal_failed",
+                run_id=str(task_run.id),
+                workflow_id=task_run.workflow_id,
+                enabled=enabled,
+                error=str(e),
+            )
+    task_run.publish_stream_state_event()
+    return task_run

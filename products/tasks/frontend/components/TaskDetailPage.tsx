@@ -83,10 +83,6 @@ export function TaskDetailPage({ taskId }: TaskDetailPageProps): JSX.Element {
         if (!selectedRun) {
             return
         }
-        // off→off is a no-op. on→on is intentional: the counter reset is the user's intent.
-        if (next === prLoopEnabled && !next) {
-            return
-        }
         setPrLoop(selectedRun.id, next)
     }
 
