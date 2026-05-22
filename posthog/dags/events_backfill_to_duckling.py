@@ -1251,6 +1251,32 @@ def register_persons_file_with_duckling(
     return True
 
 
+def drop_iceberg_table(
+    context: AssetExecutionContext,
+    conn: psycopg.Connection[Any],
+    table: str,
+) -> None:
+    """Best-effort DROP of the Iceberg table, mirroring delete_tables for DuckLake.
+
+    Used when config.delete_tables wipes the DuckLake table so the Iceberg copy
+    is reset to match instead of having dual-write append on top of stale rows.
+    Failures are logged and swallowed — the Iceberg path must never abort the
+    DuckLake backfill (e.g. when the catalog isn't attached for this org).
+    """
+    _validate_identifier(table)
+    try:
+        conn.execute(f"DROP TABLE IF EXISTS {ICEBERG_ALIAS}.posthog.{table}")
+        context.log.info(f"Dropped Iceberg table {ICEBERG_ALIAS}.posthog.{table} (delete_tables=True)")
+    except Exception as exc:
+        context.log.warning(f"Best-effort Iceberg DROP of {table} failed (continuing): {exc}")
+        logger.warning(
+            "duckling_iceberg_drop_table_failed",
+            table=table,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+
+
 def ensure_iceberg_table_exists(
     context: AssetExecutionContext,
     conn: psycopg.Connection[Any],
@@ -1426,6 +1452,9 @@ def duckling_events_backfill(context: AssetExecutionContext, config: DucklingBac
                         bucket=catalog.bucket,
                     )
                     raise
+                # Keep Iceberg in sync with the DuckLake wipe (best-effort)
+                if iceberg_enabled_for_team(team_id):
+                    drop_iceberg_table(context, conn, "events")
 
             # Create events table if it doesn't exist
             if config.create_tables_if_missing:
@@ -1602,6 +1631,9 @@ def duckling_persons_backfill(context: AssetExecutionContext, config: DucklingBa
                         bucket=catalog.bucket,
                     )
                     raise
+                # Keep Iceberg in sync with the DuckLake wipe (best-effort)
+                if iceberg_enabled_for_team(team_id):
+                    drop_iceberg_table(context, conn, "persons")
 
             # Create persons table if it doesn't exist
             if config.create_tables_if_missing:

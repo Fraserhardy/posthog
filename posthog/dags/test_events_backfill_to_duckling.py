@@ -21,6 +21,7 @@ from posthog.dags.events_backfill_to_duckling import (
     _get_cluster,
     _set_table_partitioning,
     _validate_identifier,
+    drop_iceberg_table,
     duckling_events_full_backfill_sensor,
     ensure_iceberg_table_exists,
     get_months_in_range,
@@ -250,6 +251,18 @@ class TestIcebergDualWrite:
             MagicMock(), conn, "events", "s3://b/f.parquet", 2, "timestamp", datetime(2024, 1, 15)
         )
         assert result is False
+
+    def test_drop_iceberg_table_rejects_invalid_table(self):
+        with pytest.raises(ValueError) as exc_info:
+            drop_iceberg_table(MagicMock(), MagicMock(), "events; DROP")
+        assert "Invalid SQL identifier" in str(exc_info.value)
+
+    def test_drop_iceberg_table_is_non_fatal(self):
+        # delete_tables wipes DuckLake; the Iceberg drop is best-effort and must
+        # not raise even when the catalog isn't attached for this org.
+        conn = MagicMock()
+        conn.execute.side_effect = Exception("Catalog with name iceberg does not exist")
+        drop_iceberg_table(MagicMock(), conn, "events")  # must not raise
 
 
 class TestParsePartitionKeyDates:
