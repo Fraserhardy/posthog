@@ -15,6 +15,8 @@ import {
 import { loaders } from 'kea-loaders'
 import { actionToUrl, router, urlToAction } from 'kea-router'
 
+import { lemonToast } from '@posthog/lemon-ui'
+
 import api from 'lib/api'
 import { teamLogic } from 'scenes/teamLogic'
 import { urls } from 'scenes/urls'
@@ -104,6 +106,9 @@ export const taskDetailSceneLogic = kea<taskDetailSceneLogicType>([
         recordStreamProgress: (lastEventId: string | null, seenEventIds: string[]) => ({ lastEventId, seenEventIds }),
         setLogs: (logs: string) => ({ logs }),
         updateRun: (run: TaskRun) => ({ run }),
+        setPrLoop: (runId: TaskRun['id'], enabled: boolean) => ({ runId, enabled }),
+        setPrLoopSuccess: (run: TaskRun) => ({ run }),
+        setPrLoopFailure: (error: string) => ({ error }),
     }),
 
     reducers(({ props }) => ({
@@ -213,6 +218,14 @@ export const taskDetailSceneLogic = kea<taskDetailSceneLogicType>([
             {
                 setSelectedRunId: () => false,
                 markStreamingFailed: () => true,
+            },
+        ],
+        isSettingPrLoop: [
+            false,
+            {
+                setPrLoop: () => true,
+                setPrLoopSuccess: () => false,
+                setPrLoopFailure: () => false,
             },
         ],
     })),
@@ -327,6 +340,17 @@ export const taskDetailSceneLogic = kea<taskDetailSceneLogicType>([
                 actions.setSelectedRunId(task.latest_run.id, props.taskId)
             }
             actions.loadRuns()
+        },
+        setPrLoop: async ({ runId, enabled }) => {
+            try {
+                const updated = await api.tasks.runs.setPrLoop(props.taskId, runId, enabled)
+                actions.updateRun(updated)
+                actions.setPrLoopSuccess(updated)
+                lemonToast.success(enabled ? 'CI babysitting on (counter reset)' : 'CI babysitting off')
+            } catch (error) {
+                actions.setPrLoopFailure(error instanceof Error ? error.message : 'Unknown error')
+                lemonToast.error('Failed to update CI babysitting')
+            }
         },
         loadRunsSuccess: ({ runs }) => {
             const shouldSelect = values.shouldSelectLatestRun

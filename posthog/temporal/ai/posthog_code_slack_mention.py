@@ -965,7 +965,7 @@ def forward_posthog_code_followup_activity(
     Returns True if the message was handled (forwarded or rejected), False if
     no mapping exists and the caller should continue with the normal new-task flow.
     """
-    from products.slack_app.backend.api import _parse_rules_command
+    from products.slack_app.backend.api import _parse_babysit_command, _parse_rules_command
 
     if _parse_rules_command(event_text):
         return False
@@ -980,6 +980,8 @@ def forward_posthog_code_followup_activity(
 
     log = structlog.get_logger(__name__)
 
+    babysit_decision = _parse_babysit_command(event_text)
+
     try:
         mapping = SlackThreadTaskMapping.objects.select_related("task_run", "task__created_by").get(
             integration_id=inputs.integration_id,
@@ -987,6 +989,15 @@ def forward_posthog_code_followup_activity(
             thread_ts=thread_ts,
         )
     except SlackThreadTaskMapping.DoesNotExist:
+        if babysit_decision is not None:
+            # Babysit only makes sense for an existing task thread; surface a hint
+            # rather than letting the caller create a fresh task from the text.
+            log.info(
+                "posthog_code_babysit_no_mapping",
+                channel=channel,
+                thread_ts=thread_ts,
+            )
+            return True
         log.info("posthog_code_followup_not_handled", channel=channel, thread_ts=thread_ts)
         return False
 
@@ -1011,6 +1022,28 @@ def forward_posthog_code_followup_activity(
             channel=channel,
             thread_ts=thread_ts,
             text="Only the person who started this task can send follow-up messages to the agent.",
+        )
+        return True
+
+    if babysit_decision is not None:
+        from products.tasks.backend.services.pr_loop import set_pr_loop_for_run
+
+        set_pr_loop_for_run(task_run, babysit_decision)
+        if babysit_decision:
+            confirmation = "Babysitting on — I'll watch CI on this PR and follow up on failed checks (counter reset)."
+        else:
+            confirmation = "Babysitting off — I'll stop following up on CI for this PR."
+        slack.client.chat_postMessage(
+            channel=channel,
+            thread_ts=thread_ts,
+            text=confirmation,
+        )
+        log.info(
+            "posthog_code_babysit_applied",
+            channel=channel,
+            thread_ts=thread_ts,
+            run_id=str(task_run.id),
+            enabled=babysit_decision,
         )
         return True
 

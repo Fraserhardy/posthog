@@ -20,6 +20,7 @@ from products.slack_app.backend.api import (
     _get_full_repo_names,
     _invalidate_repo_list_cache,
     _match_repo_rule,
+    _parse_babysit_command,
     _parse_rules_command,
     _repo_list_cache_key,
     classify_task_needs_repo,
@@ -737,6 +738,35 @@ class TestParseRulesCommand:
     )
     def test_returns_none_for_non_commands(self, _name, text):
         assert _parse_rules_command(text) is None
+
+
+class TestParseBabysitCommand:
+    @parameterized.expand(
+        [
+            ("on_lower", "babysit on", True),
+            ("off_lower", "babysit off", False),
+            ("on_caps", "BABYSIT ON", True),
+            ("off_mixed", "Babysit Off", False),
+            ("on_extra_spaces", "babysit   on", True),
+            ("on_bot_mention", "<@U123BOT> babysit on", True),
+            ("off_bot_mention", "<@U123BOT> babysit off", False),
+        ]
+    )
+    def test_parses_command(self, _name, text, expected):
+        assert _parse_babysit_command(text) is expected
+
+    @parameterized.expand(
+        [
+            ("empty", ""),
+            ("just_mention", "<@U123BOT>"),
+            ("missing_value", "babysit"),
+            ("invalid_value", "babysit maybe"),
+            ("trailing_token", "babysit on please"),
+            ("random_text", "fix the bug in posthog-js"),
+        ]
+    )
+    def test_returns_none_for_non_commands(self, _name, text):
+        assert _parse_babysit_command(text) is None
 
 
 class TestHandleRulesCommandActivity:

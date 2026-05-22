@@ -232,6 +232,7 @@ export type SettingId =
     | 'change-requests'
     | 'banner'
     | 'mcp-hints'
+    | 'pr-babysit-default'
 
 type FeatureFlagKey = keyof typeof FEATURE_FLAGS
 
