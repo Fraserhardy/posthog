@@ -14,18 +14,23 @@ from posthog.dags.events_backfill_to_duckling import (
     EVENTS_TABLE_DDL,
     EXPECTED_DUCKLAKE_COLUMNS,
     EXPECTED_DUCKLAKE_PERSONS_COLUMNS,
+    ICEBERG_BACKFILL_TEAM_IDS,
+    ICEBERG_PERSONS_TABLE_DDL,
     PERSONS_COLUMNS,
     PERSONS_TABLE_DDL,
     _get_cluster,
     _set_table_partitioning,
     _validate_identifier,
     duckling_events_full_backfill_sensor,
+    ensure_iceberg_table_exists,
     get_months_in_range,
     get_s3_url_for_clickhouse,
+    iceberg_enabled_for_team,
     is_full_export_partition,
     parse_partition_key,
     parse_partition_key_dates,
     table_exists,
+    write_partition_to_iceberg,
 )
 
 
@@ -188,6 +193,63 @@ class TestPersonsDDL:
         conn.execute(ddl)
         conn.execute(ddl)
         conn.close()
+
+
+class TestIcebergDualWrite:
+    @parameterized.expand([(2, True), (1, False), (12345, False), (0, False)])
+    def test_iceberg_enabled_for_team(self, team_id, expected):
+        assert iceberg_enabled_for_team(team_id) is expected
+        assert ICEBERG_BACKFILL_TEAM_IDS == {2}
+
+    def test_iceberg_persons_ddl_is_valid_sql_with_signed_version(self):
+        conn = duckdb.connect()
+        conn.execute("CREATE SCHEMA IF NOT EXISTS memory.posthog")
+        conn.execute(ICEBERG_PERSONS_TABLE_DDL.format(catalog="memory"))
+
+        result = conn.execute("DESCRIBE memory.posthog.persons").fetchall()
+        column_names = {row[0] for row in result}
+        types_by_name = {row[0]: row[1] for row in result}
+
+        assert column_names == EXPECTED_DUCKLAKE_PERSONS_COLUMNS
+        # Iceberg has no unsigned types — person_version must be signed BIGINT, not UBIGINT.
+        assert types_by_name["person_version"] == "BIGINT"
+        conn.close()
+
+    def test_iceberg_persons_ddl_is_idempotent(self):
+        conn = duckdb.connect()
+        conn.execute("CREATE SCHEMA IF NOT EXISTS memory.posthog")
+        ddl = ICEBERG_PERSONS_TABLE_DDL.format(catalog="memory")
+        conn.execute(ddl)
+        conn.execute(ddl)
+        conn.close()
+
+    def test_ensure_iceberg_table_returns_false_when_catalog_unavailable(self):
+        # When the iceberg catalog isn't attached, CREATE SCHEMA raises — the
+        # helper must swallow it and disable Iceberg for the run, not fail.
+        conn = MagicMock()
+        conn.execute.side_effect = Exception("Catalog with name iceberg does not exist")
+        assert ensure_iceberg_table_exists(MagicMock(), conn, "events", EVENTS_TABLE_DDL) is False
+
+    def test_ensure_iceberg_table_returns_true_on_success(self):
+        conn = MagicMock()
+        assert ensure_iceberg_table_exists(MagicMock(), conn, "events", EVENTS_TABLE_DDL) is True
+
+    def test_write_partition_rejects_invalid_table(self):
+        with pytest.raises(ValueError) as exc_info:
+            write_partition_to_iceberg(
+                MagicMock(), MagicMock(), "events; DROP TABLE", "s3://b/f.parquet", 2, "timestamp", None
+            )
+        assert "Invalid SQL identifier" in str(exc_info.value)
+
+    def test_write_partition_is_non_fatal_on_insert_failure(self):
+        # A failed Iceberg INSERT must never bubble up — DuckLake is the source
+        # of truth and its backfill must complete regardless.
+        conn = MagicMock()
+        conn.execute.side_effect = Exception("iceberg insert blew up")
+        result = write_partition_to_iceberg(
+            MagicMock(), conn, "events", "s3://b/f.parquet", 2, "timestamp", datetime(2024, 1, 15)
+        )
+        assert result is False
 
 
 class TestParsePartitionKeyDates:
