@@ -58,6 +58,7 @@ from posthog.temporal.llm_analytics.trace_summarization.schedule import (
 )
 from posthog.temporal.logs_alerting.schedule import create_logs_alert_check_schedule
 from posthog.temporal.mcp_analytics.backfill_sessions.types import BackfillMCPSessionsInput
+from posthog.temporal.mcp_analytics.intent_clustering.schedule import create_intent_clustering_coordinator_schedule
 from posthog.temporal.mcp_analytics.summarize_session_intents.types import SummarizeMCPSessionIntentsInput
 from posthog.temporal.messaging.schedule import create_all_realtime_cohort_calculation_schedules
 from posthog.temporal.product_analytics.upgrade_queries_workflow import UpgradeQueriesWorkflowInputs
@@ -658,6 +659,7 @@ schedules = [
     create_batch_generation_summarization_schedule,
     create_trace_clustering_coordinator_schedule,
     create_generation_clustering_coordinator_schedule,
+    create_intent_clustering_coordinator_schedule,
     create_eval_reports_schedule,
     create_count_trigger_schedule,
     create_evaluation_sampler_schedule,
