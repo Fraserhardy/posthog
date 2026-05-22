@@ -6,7 +6,10 @@ from datetime import datetime
 
 from django.utils import timezone as tz
 
+import dateutil.parser
 import temporalio.activity
+from asgiref.sync import sync_to_async
+from prometheus_client import Counter
 from slack_sdk.errors import SlackApiError
 from structlog import get_logger
 from temporalio.exceptions import ApplicationError
@@ -35,11 +38,13 @@ from posthog.temporal.subscriptions.types import (
 
 from products.dashboards.backend.models.dashboard_tile import DashboardTile
 
+from ee.billing.quota_limiting import is_team_over_ai_credit_budget
 from ee.tasks.subscriptions import SLACK_USER_CONFIG_ERRORS, _capture_delivery_failed_event
 from ee.tasks.subscriptions.ai_subscription.delivery import (
     SlackIntegrationMissingError,
     generate_ai_subscription_markdown,
     render_ai_email_html,
+    send_email_ai_subscription_credit_limited,
     send_email_ai_subscription_report,
     send_slack_ai_subscription_report,
 )
@@ -69,6 +74,13 @@ NO_ASSETS_REASON = "No assets to deliver — likely a transient export pipeline 
 # `SubscriptionDelivery.content_snapshot` key under which AI deliveries cache the
 # generated markdown so Temporal retries don't re-bill the planner + synthesis LLM.
 AI_MARKDOWN_SNAPSHOT_KEY = "ai_markdown"
+
+# Parallels SUBSCRIPTION_SUMMARY_SKIPPED_OVER_CREDIT_BUDGET in snapshot_activities.py — the AI
+# *summary* path and the AI *subscription* path both skip on the same billing signal.
+SUBSCRIPTION_AI_SKIPPED_OVER_CREDIT_BUDGET = Counter(
+    "posthog_subscription_ai_report_skipped_over_credit_budget_total",
+    "AI subscription delivery skipped because the organization is over its AI credit budget",
+)
 
 
 async def _load_cached_ai_markdown(delivery_id: uuid.UUID | None) -> str | None:
@@ -381,7 +393,9 @@ async def deliver_subscription(inputs: DeliverSubscriptionInputs) -> DeliverSubs
     recipient_results: list[RecipientResult] = []
 
     subscription = await database_sync_to_async(
-        Subscription.objects.select_related("created_by", "insight", "dashboard", "team", "integration").get,
+        Subscription.objects.select_related(
+            "created_by", "insight", "dashboard", "team__organization", "integration"
+        ).get,
         thread_sensitive=False,
     )(pk=inputs.subscription_id)
 
@@ -599,6 +613,51 @@ async def deliver_subscription(inputs: DeliverSubscriptionInputs) -> DeliverSubs
     return DeliverSubscriptionResult(recipient_results=recipient_results)
 
 
+# If the org's AI-credit balance isn't synced yet, reschedule roughly a billing cycle out so a
+# skipped sub still moves forward instead of re-firing every tick.
+_CREDIT_RESET_FALLBACK_DAYS = 31
+
+
+def _ai_credit_reset_date(subscription: Subscription) -> datetime:
+    """When the org's AI credits next reset — the billing-period end synced from billing.
+    Caller must have loaded the subscription with `select_related("team__organization")`
+    (deliver_subscription does) so reading `team.organization.usage` here is query-free."""
+    usage = subscription.team.organization.usage
+    # usage["period"] is [current_period_start, current_period_end] as ISO strings (set in
+    # billing_manager.py); index 1 — the period end — is when AI credits reset.
+    period = usage.get("period") if usage else None
+    if period and len(period) == 2 and period[1]:
+        try:
+            return dateutil.parser.isoparse(period[1])
+        except (ValueError, TypeError):
+            pass
+    return tz.now() + dt.timedelta(days=_CREDIT_RESET_FALLBACK_DAYS)
+
+
+def _skip_ai_delivery_over_credit_limit_sync(subscription: Subscription) -> datetime:
+    """Reschedule the over-limit subscription past the credit reset and notify the owner once.
+    Runs entirely sync (DB + email) — call via `database_sync_to_async`.
+
+    Persists `next_delivery_date = reset_date` so the always-runs `advance_next_delivery_date`
+    activity recomputes from it (`rrule.after(reset_date)`) — otherwise the next slot could fall
+    before the reset and re-fire while still over-limit.
+    """
+    reset_date = _ai_credit_reset_date(subscription)
+    subscription.next_delivery_date = reset_date
+    subscription.save(update_fields=["next_delivery_date"])
+
+    if subscription.created_by and subscription.created_by.email:
+        send_email_ai_subscription_credit_limited(
+            email=subscription.created_by.email,
+            subscription=subscription,
+            resume_date=reset_date,
+            # Stable within a billing period (reset_date is the period end), so MessagingRecord
+            # dedups to one notice per credit-reset cycle.
+            billing_period_key=reset_date.date().isoformat(),
+        )
+    return reset_date
+
+
 async def _deliver_ai_subscription(
     subscription: Subscription,
     inputs: DeliverSubscriptionInputs,
@@ -648,6 +707,40 @@ async def _deliver_ai_subscription(
         )
         markdown = cached_markdown
     else:
+        # Only gate on AI credits for a cache MISS — a hit means tokens were already spent on a
+        # prior retry this run, so shipping it costs nothing and shouldn't be blocked. The
+        # interactive Max path enforces this same limit in ee/api/conversation.py; scheduled
+        # deliveries need their own check or they'd keep spending against an exhausted balance.
+        # Fail open: a transient quota-lookup error shouldn't drop a deliverable report. The check
+        # reads Redis (not the DB), so sync_to_async — but the reschedule below writes the row, so
+        # that stays on database_sync_to_async.
+        try:
+            over_credit_budget = await sync_to_async(is_team_over_ai_credit_budget, thread_sensitive=False)(
+                subscription.team.api_token
+            )
+        except Exception as exc:
+            over_credit_budget = False
+            LOGGER.warning(
+                "deliver_subscription.ai_credit_budget_check_failed",
+                subscription_id=subscription.id,
+                error=str(exc),
+                exc_info=True,
+            )
+        if over_credit_budget:
+            SUBSCRIPTION_AI_SKIPPED_OVER_CREDIT_BUDGET.inc()
+            reset_date = await database_sync_to_async(_skip_ai_delivery_over_credit_limit_sync, thread_sensitive=False)(
+                subscription
+            )
+            LOGGER.warning(
+                "deliver_subscription.ai_skipped_over_credit_limit",
+                subscription_id=subscription.id,
+                team_id=subscription.team_id,
+                resumes_at=reset_date.isoformat(),
+            )
+            # Empty recipient_results → the delivery row lands as COMPLETED with no recipients
+            # (workflows.py sets COMPLETED for the AI path), never FAILED, so the subscription
+            # doesn't look broken in history. The counter + warning above are the skip signal.
+            return DeliverSubscriptionResult(recipient_results=[])
         try:
             markdown = await database_sync_to_async(generate_ai_subscription_markdown, thread_sensitive=False)(
                 subscription

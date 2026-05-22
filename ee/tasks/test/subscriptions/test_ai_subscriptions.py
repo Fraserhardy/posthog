@@ -15,7 +15,11 @@ from parameterized import parameterized
 from posthog.models.instance_setting import set_instance_setting
 from posthog.models.messaging import MessagingRecord, get_email_hash
 from posthog.models.subscription import Subscription
-from posthog.temporal.subscriptions.activities import _deliver_ai_subscription
+from posthog.temporal.subscriptions.activities import (
+    _ai_credit_reset_date,
+    _deliver_ai_subscription,
+    _skip_ai_delivery_over_credit_limit_sync,
+)
 from posthog.temporal.subscriptions.types import DeliverSubscriptionInputs, DeliverSubscriptionResult
 
 from ee.hogai.ai_reports import AiReportStageError
@@ -498,6 +502,11 @@ class TestDeliverAISubscriptionActivity(APIBaseTest):
     errors, Slack-integration auto-disable. The narrower unit tests above cover the per-
     helper logic; these tests exercise the activity wiring that connects them."""
 
+    def setUp(self) -> None:
+        super().setUp()
+        self.organization.is_ai_data_processing_approved = True
+        self.organization.save(update_fields=["is_ai_data_processing_approved"])
+
     def _ai_email_sub(self) -> Subscription:
         return create_subscription(
             team=self.team,
@@ -571,6 +580,138 @@ class TestDeliverAISubscriptionActivity(APIBaseTest):
         mock_generate.assert_not_called()
         mock_persist.assert_not_called()
         mock_send_email.assert_called_once()
+        assert result.recipient_results[0].status == "success"
+
+    @patch("posthog.temporal.subscriptions.activities._skip_ai_delivery_over_credit_limit_sync")
+    @patch("posthog.temporal.subscriptions.activities._load_cached_ai_markdown", new_callable=AsyncMock)
+    @patch("posthog.temporal.subscriptions.activities.generate_ai_subscription_markdown")
+    @patch("posthog.temporal.subscriptions.activities.is_team_over_ai_credit_budget")
+    def test_over_ai_credit_limit_skips_delivery_without_spending_tokens(
+        self, mock_limited, mock_generate, mock_load_cache, mock_skip
+    ):
+        mock_limited.return_value = True
+        mock_load_cache.return_value = None  # cache miss → would otherwise spend tokens
+        mock_skip.return_value = datetime(2025, 2, 1, tzinfo=ZoneInfo("UTC"))
+        sub = self._ai_email_sub()
+
+        result = asyncio.run(_deliver_ai_subscription(sub, self._delivery_inputs(sub.id), []))
+
+        mock_generate.assert_not_called()
+        mock_skip.assert_called_once()
+        # Empty recipient_results → delivery row lands as COMPLETED with no recipients, never FAILED.
+        assert result.recipient_results == []
+
+    @patch("posthog.temporal.subscriptions.activities._persist_ai_markdown", new_callable=AsyncMock)
+    @patch("posthog.temporal.subscriptions.activities._load_cached_ai_markdown", new_callable=AsyncMock)
+    @patch("posthog.temporal.subscriptions.activities.send_email_ai_subscription_report")
+    @patch("posthog.temporal.subscriptions.activities.generate_ai_subscription_markdown")
+    @patch("posthog.temporal.subscriptions.activities.is_team_over_ai_credit_budget")
+    def test_credit_check_error_fails_open_and_delivers(
+        self, mock_limited, mock_generate, mock_send_email, mock_load_cache, mock_persist
+    ):
+        # A quota-lookup error must not drop a deliverable report — fail open and deliver.
+        mock_limited.side_effect = RuntimeError("quota cache unavailable")
+        mock_load_cache.return_value = None
+        mock_generate.return_value = "# Report"
+        sub = self._ai_email_sub()
+
+        result = asyncio.run(_deliver_ai_subscription(sub, self._delivery_inputs(sub.id, delivery_id=uuid.uuid4()), []))
+
+        mock_generate.assert_called_once()
+        mock_send_email.assert_called_once()
+        assert result.recipient_results[0].status == "success"
+
+    @parameterized.expand(
+        [
+            ("no_usage", None),
+            ("empty_period", {"period": []}),
+            ("null_end", {"period": ["2025-01-01T00:00:00Z", None]}),
+            ("unparseable_end", {"period": ["2025-01-01T00:00:00Z", "not-a-date"]}),
+        ]
+    )
+    def test_credit_reset_date_falls_back_on_bad_billing_period(self, _name, usage):
+        self.organization.usage = usage
+        self.organization.save(update_fields=["usage"])
+        sub = self._ai_email_sub()
+
+        reset_date = _ai_credit_reset_date(sub)
+
+        # Bad/missing period → fallback reschedule a cycle out, always in the future.
+        assert reset_date > timezone.now()
+
+    @patch("ee.tasks.subscriptions.ai_subscription.delivery.EmailMessage")
+    def test_skip_helper_reschedules_past_credit_reset_and_emails_owner(self, mock_email_cls):
+        # Credit reset = the org's synced billing-period end.
+        self.organization.usage = {"period": ["2025-01-01T00:00:00Z", "2025-02-01T00:00:00Z"]}
+        self.organization.save(update_fields=["usage"])
+        sub = self._ai_email_sub()
+
+        reset_date = _skip_ai_delivery_over_credit_limit_sync(sub)
+
+        assert reset_date == datetime(2025, 2, 1, tzinfo=ZoneInfo("UTC"))
+        sub.refresh_from_db()
+        # advance_next_delivery_date later normalizes this to the first on-schedule slot after reset.
+        assert sub.next_delivery_date == datetime(2025, 2, 1, tzinfo=ZoneInfo("UTC"))
+        assert sub.enabled, "an over-limit sub stays enabled — it resumes when credits reset"
+        mock_email_cls.return_value.send.assert_called_once()
+        # campaign_key carries sub id + billing-period date so MessagingRecord dedups to one
+        # notice per credit-reset cycle — assert it, not just that send() fired.
+        campaign_key = mock_email_cls.call_args.kwargs["campaign_key"]
+        assert str(sub.id) in campaign_key
+        assert "2025-02-01" in campaign_key
+
+    @patch("ee.tasks.subscriptions.ai_subscription.delivery.EmailMessage")
+    def test_skip_helper_no_owner_reschedules_without_emailing(self, mock_email_cls):
+        self.organization.usage = {"period": ["2025-01-01T00:00:00Z", "2025-02-01T00:00:00Z"]}
+        self.organization.save(update_fields=["usage"])
+        sub = self._ai_email_sub()
+        sub.created_by = None
+        sub.save(update_fields=["created_by"])
+
+        reset_date = _skip_ai_delivery_over_credit_limit_sync(sub)
+
+        assert reset_date == datetime(2025, 2, 1, tzinfo=ZoneInfo("UTC"))
+        sub.refresh_from_db()
+        assert sub.next_delivery_date == datetime(2025, 2, 1, tzinfo=ZoneInfo("UTC"))
+        mock_email_cls.assert_not_called()
+
+    @patch("ee.tasks.subscriptions.ai_subscription.delivery.EmailMessage")
+    def test_skip_helper_falls_back_when_billing_period_unsynced(self, mock_email_cls):
+        # No synced usage → reschedule roughly a cycle out so the sub still moves forward.
+        self.organization.usage = None
+        self.organization.save(update_fields=["usage"])
+        sub = self._ai_email_sub()
+
+        reset_date = _skip_ai_delivery_over_credit_limit_sync(sub)
+
+        assert reset_date > timezone.now()
+        sub.refresh_from_db()
+        assert sub.next_delivery_date is not None and sub.next_delivery_date > timezone.now()
+        # The owner still gets the one-per-cycle notice on the fallback path, keyed on the
+        # fallback reset date so MessagingRecord dedups to one notice per fallback cycle.
+        mock_email_cls.return_value.send.assert_called_once()
+        assert reset_date.date().isoformat() in mock_email_cls.call_args.kwargs["campaign_key"]
+
+    @patch("posthog.temporal.subscriptions.activities._persist_ai_markdown", new_callable=AsyncMock)
+    @patch("posthog.temporal.subscriptions.activities._load_cached_ai_markdown", new_callable=AsyncMock)
+    @patch("posthog.temporal.subscriptions.activities.send_email_ai_subscription_report")
+    @patch("posthog.temporal.subscriptions.activities.send_email_ai_subscription_credit_limited")
+    @patch("posthog.temporal.subscriptions.activities.generate_ai_subscription_markdown")
+    @patch("posthog.temporal.subscriptions.activities.is_team_over_ai_credit_budget")
+    def test_cached_markdown_delivers_even_when_over_credit_limit(
+        self, mock_limited, mock_generate, mock_send_credit_email, mock_send_report, mock_load_cache, mock_persist
+    ):
+        # Cache hit means the tokens were already spent on a prior retry this run — shipping it
+        # is free, so the credit limit must NOT block it.
+        mock_limited.return_value = True
+        mock_load_cache.return_value = "# Cached"
+        sub = self._ai_email_sub()
+
+        result = asyncio.run(_deliver_ai_subscription(sub, self._delivery_inputs(sub.id, delivery_id=uuid.uuid4()), []))
+
+        mock_generate.assert_not_called()
+        mock_send_credit_email.assert_not_called()
+        mock_send_report.assert_called_once()
         assert result.recipient_results[0].status == "success"
 
 
