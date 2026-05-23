@@ -79,7 +79,7 @@ export const SignalsScoutProjectProfileGetQueryParams = /* @__PURE__ */ zod.obje
 })
 
 /**
- * Return the most recent `SignalScoutRun` summaries for this project, newest first. Used by the headless agent to dedupe against work other runs already covered. ILIKE matches on `summary`; results are capped at 100.
+ * Return the most recent `SignalScoutRun` summaries for this project, newest first. Used by the headless scout to dedupe against work other runs already covered. ILIKE matches on `summary`. `date_from` / `date_to` are a half-open window on `created_at` (`>= date_from`, `< date_to`); pass `date_to` on subsequent calls to walk past the 100-row cap. Results capped at 100.
  * @summary Search recent agent runs
  */
 export const SignalsScoutRunsListParams = /* @__PURE__ */ zod.object({
@@ -93,24 +93,31 @@ export const SignalsScoutRunsListParams = /* @__PURE__ */ zod.object({
 export const signalsScoutRunsListQueryLimitMax = 100
 
 export const SignalsScoutRunsListQueryParams = /* @__PURE__ */ zod.object({
+    date_from: zod.iso
+        .datetime({ offset: true })
+        .optional()
+        .describe('ISO-8601 inclusive lower bound on `created_at`. Omit to skip the lower bound.'),
+    date_to: zod.iso
+        .datetime({ offset: true })
+        .optional()
+        .describe(
+            'ISO-8601 exclusive upper bound on `created_at`. Pass to walk back past the result cap on subsequent calls (cursor-style: set to the `started_at` of the oldest run from the prior page).'
+        ),
     limit: zod
         .number()
         .min(1)
         .max(signalsScoutRunsListQueryLimitMax)
         .optional()
         .describe('Max rows to return (default 20, hard cap 100).'),
-    since: zod.iso
-        .datetime({ offset: true })
-        .optional()
-        .describe('ISO-8601 lower bound on `started_at`. Use to scope to a recent window.'),
     text: zod
         .string()
+        .min(1)
         .optional()
-        .describe('ILIKE substring match against `summary`. Omit to return the latest runs unfiltered.'),
+        .describe("Case-insensitive substring match on the scout's end-of-run `summary`. Omit to skip the filter."),
 })
 
 /**
- * Return the full `SignalScoutRun` row including `summary`, `findings`, `hypotheses_considered`, `run_metrics`, and `metadata`. Strictly team-scoped — a UUID belonging to another team returns 404.
+ * Return the full `SignalScoutRun` row. Status, timing, and error flow from the linked `tasks.TaskRun`. Strictly team-scoped — a UUID belonging to another team returns 404.
  * @summary Get a run by ID
  */
 export const SignalsScoutRunsRetrieveParams = /* @__PURE__ */ zod.object({
@@ -123,7 +130,7 @@ export const SignalsScoutRunsRetrieveParams = /* @__PURE__ */ zod.object({
 })
 
 /**
- * Persist a finding to `SignalScoutRun.findings` and fire `emit_signal` with `source_product = signals_scout`. Idempotent on `(run_id, finding_id)` — a second call with the same `finding_id` short-circuits without re-firing the pipeline. Honors the team's `shadow_mode` flag: when true, the finding is persisted but the external emit is a no-op.
+ * Fire `emit_signal` with `source_product = signals_scout`. Idempotent on `(run_id, finding_id)` via the deterministic `Signal.source_id = run:<id>:finding:<id>` — a second call with the same `finding_id` short-circuits without re-firing the pipeline.
  * @summary Emit a finding for a run
  */
 export const SignalsScoutEmitSignalParams = /* @__PURE__ */ zod.object({
@@ -178,7 +185,17 @@ export const SignalsScoutEmitSignalBody = /* @__PURE__ */ zod
             .max(signalsScoutEmitSignalBodyEvidenceMax)
             .describe('Citations supporting the finding. Capped at 20 entries.'),
         hypothesis: zod.string().nullish().describe('Optional one-line hypothesis the finding tests.'),
-        severity: zod.string().nullish().describe('Optional severity tag (`P0`-`P4`) — informational only.'),
+        severity: zod
+            .union([
+                zod
+                    .enum(['P0', 'P1', 'P2', 'P3', 'P4'])
+                    .describe('* `P0` - P0\n* `P1` - P1\n* `P2` - P2\n* `P3` - P3\n* `P4` - P4'),
+                zod.null(),
+            ])
+            .optional()
+            .describe(
+                'Optional severity tag — one of P0, P1, P2, P3, P4. Informational only.\n\n* `P0` - P0\n* `P1` - P1\n* `P2` - P2\n* `P3` - P3\n* `P4` - P4'
+            ),
         dedupe_keys: zod
             .array(zod.string())
             .optional()
@@ -202,10 +219,10 @@ export const SignalsScoutEmitSignalBody = /* @__PURE__ */ zod
     .describe('Request body for `emit-finding`. Run attribution is taken from the URL path.')
 
 /**
- * Return `SignalScratchpad` entries for this project. ILIKE matches on `content`; tags filter via Postgres array overlap. Expired `agent_inference` entries are hidden by default.
- * @summary Search durable memories
+ * Return `SignalScratchpad` entries for this project. ILIKE matches on `content` and `key`.
+ * @summary Search the scout scratchpad
  */
-export const SignalsScoutScratchpadListParams = /* @__PURE__ */ zod.object({
+export const SignalsScoutScratchpadSearchParams = /* @__PURE__ */ zod.object({
     project_id: zod
         .string()
         .describe(
@@ -213,23 +230,15 @@ export const SignalsScoutScratchpadListParams = /* @__PURE__ */ zod.object({
         ),
 })
 
-export const signalsScoutScratchpadListQueryLimitMax = 100
+export const signalsScoutScratchpadSearchQueryLimitMax = 100
 
-export const SignalsScoutScratchpadListQueryParams = /* @__PURE__ */ zod.object({
-    include_expired: zod
-        .boolean()
-        .optional()
-        .describe('Include expired `agent_inference` entries (default false). Use for audit/debug only.'),
+export const SignalsScoutScratchpadSearchQueryParams = /* @__PURE__ */ zod.object({
     limit: zod
         .number()
         .min(1)
-        .max(signalsScoutScratchpadListQueryLimitMax)
+        .max(signalsScoutScratchpadSearchQueryLimitMax)
         .optional()
         .describe('Max rows to return (default 20, hard cap 100).'),
-    tags: zod
-        .array(zod.string())
-        .optional()
-        .describe('Tags filtered via Postgres array overlap. Pass repeated `tags=` query params to filter.'),
     text: zod
         .string()
         .optional()
@@ -237,10 +246,10 @@ export const SignalsScoutScratchpadListQueryParams = /* @__PURE__ */ zod.object(
 })
 
 /**
- * Upsert an `agent_inference` memory keyed on `(team, key)`. Re-using a key updates the existing entry in place and resets its TTL. Cannot overwrite `human_confirmed` entries.
- * @summary Write or refresh an agent memory
+ * Upsert a memory keyed on `(team, key)`. Re-using a key updates the existing entry in place.
+ * @summary Remember a scratchpad entry
  */
-export const SignalsScoutScratchpadCreateParams = /* @__PURE__ */ zod.object({
+export const SignalsScoutScratchpadRememberParams = /* @__PURE__ */ zod.object({
     project_id: zod
         .string()
         .describe(
@@ -248,24 +257,15 @@ export const SignalsScoutScratchpadCreateParams = /* @__PURE__ */ zod.object({
         ),
 })
 
-export const signalsScoutScratchpadCreateBodyKeyMax = 300
+export const signalsScoutScratchpadRememberBodyKeyMax = 300
 
-export const signalsScoutScratchpadCreateBodyTtlDaysMax = 90
-
-export const SignalsScoutScratchpadCreateBody = /* @__PURE__ */ zod
+export const SignalsScoutScratchpadRememberBody = /* @__PURE__ */ zod
     .object({
         key: zod
             .string()
-            .max(signalsScoutScratchpadCreateBodyKeyMax)
+            .max(signalsScoutScratchpadRememberBodyKeyMax)
             .describe('Agent-chosen semantic key. Re-using a key updates the existing entry in place.'),
         content: zod.string().describe('Prose to write. Read verbatim into future prompts.'),
-        tags: zod.array(zod.string()).optional().describe('Tags for later search. Empty/whitespace tags are dropped.'),
-        ttl_days: zod
-            .number()
-            .min(1)
-            .max(signalsScoutScratchpadCreateBodyTtlDaysMax)
-            .optional()
-            .describe('Days until expiry (default 7, hard cap 90).'),
         run_id: zod
             .uuid()
             .nullish()
@@ -273,13 +273,13 @@ export const SignalsScoutScratchpadCreateBody = /* @__PURE__ */ zod
                 'Run that authored this memory; persisted as `created_by_run_id` for lineage. Must reference a run on this same project — cross-project run UUIDs are rejected.'
             ),
     })
-    .describe('Request body for `remember`. Authority is always `agent_inference` — humans use Django admin.')
+    .describe('Request body for `remember`.')
 
 /**
- * Delete an `agent_inference` entry by key. Returns `deleted=false` if no row matched. Cannot delete `human_confirmed` entries — those are human-managed only.
- * @summary Delete an agent memory by key
+ * Delete an entry by key. Returns `deleted=false` if no row matched.
+ * @summary Forget a scratchpad entry by key
  */
-export const SignalsScoutScratchpadDeleteParams = /* @__PURE__ */ zod.object({
+export const SignalsScoutScratchpadForgetParams = /* @__PURE__ */ zod.object({
     project_id: zod
         .string()
         .describe(
@@ -287,13 +287,13 @@ export const SignalsScoutScratchpadDeleteParams = /* @__PURE__ */ zod.object({
         ),
 })
 
-export const signalsScoutScratchpadDeleteBodyKeyMax = 300
+export const signalsScoutScratchpadForgetBodyKeyMax = 300
 
-export const SignalsScoutScratchpadDeleteBody = /* @__PURE__ */ zod
+export const SignalsScoutScratchpadForgetBody = /* @__PURE__ */ zod
     .object({
-        key: zod.string().max(signalsScoutScratchpadDeleteBodyKeyMax).describe('Memory key to delete.'),
+        key: zod.string().max(signalsScoutScratchpadForgetBodyKeyMax).describe('Memory key to delete.'),
     })
-    .describe('Request body for `forget`. Only `agent_inference` keys can be deleted.')
+    .describe('Request body for `forget`.')
 
 export const SignalsSourceConfigsListParams = /* @__PURE__ */ zod.object({
     project_id: zod
