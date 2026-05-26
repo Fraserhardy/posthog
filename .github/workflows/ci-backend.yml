@@ -415,17 +415,14 @@ jobs:
               run: sudo apt-get update && sudo apt-get install -y libxml2-dev libxmlsec1-dev libxmlsec1-openssl
 
             - name: Install Rust
-              uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+              uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
               with:
                   toolchain: 1.91.1
-                  components: cargo
-
-            - name: Cache Rust dependencies
-              uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-              with:
-                  shared-key: 'v2-rust-backend'
-                  workspaces: rust
-                  save-if: ${{ github.ref == 'refs/heads/master' }}
+                  rust-src-dir: rust
+                  cache-workspaces: rust
+                  cache-shared-key: v2-rust-backend
+                  cache-save-if: ${{ github.ref == 'refs/heads/master' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
+                  rustflags: ''
 
             - name: Install sqlx-cli
               uses: ./.github/actions/setup-sqlx-cli
@@ -624,17 +621,14 @@ jobs:
                   sudo apt-get update
                   sudo apt-get install libxml2-dev libxmlsec1-dev libxmlsec1-openssl
             - name: Install Rust
-              uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+              uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
               with:
                   toolchain: 1.91.1
-                  components: cargo
-
-            - name: Cache Rust dependencies
-              uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-              with:
-                  shared-key: 'v2-rust-backend'
-                  workspaces: rust
-                  save-if: ${{ github.ref == 'refs/heads/master' }}
+                  rust-src-dir: rust
+                  cache-workspaces: rust
+                  cache-shared-key: v2-rust-backend
+                  cache-save-if: ${{ github.ref == 'refs/heads/master' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
+                  rustflags: ''
 
             - name: Install sqlx-cli
               uses: ./.github/actions/setup-sqlx-cli
@@ -1487,18 +1481,14 @@ jobs:
 
             - name: Install Rust
               if: needs.changes.outputs.backend == 'true'
-              uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+              uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
               with:
                   toolchain: 1.91.1
-                  components: cargo
-
-            - name: Cache Rust dependencies
-              if: needs.changes.outputs.backend == 'true'
-              uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-              with:
-                  shared-key: 'v2-rust-backend'
-                  workspaces: rust
-                  save-if: ${{ github.ref == 'refs/heads/master' }}
+                  rust-src-dir: rust
+                  cache-workspaces: rust
+                  cache-shared-key: v2-rust-backend
+                  cache-save-if: ${{ github.ref == 'refs/heads/master' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
+                  rustflags: ''
 
             - name: Install sqlx-cli
               if: needs.changes.outputs.backend == 'true'
@@ -2130,17 +2120,14 @@ jobs:
                   sudo apt-get install libxml2-dev libxmlsec1-dev libxmlsec1-openssl
 
             - name: Install Rust
-              uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+              uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
               with:
                   toolchain: 1.91.1
-                  components: cargo
-
-            - name: Cache Rust dependencies
-              uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-              with:
-                  shared-key: 'v2-rust-backend'
-                  workspaces: rust
-                  save-if: ${{ github.ref == 'refs/heads/master' }}
+                  rust-src-dir: rust
+                  cache-workspaces: rust
+                  cache-shared-key: v2-rust-backend
+                  cache-save-if: ${{ github.ref == 'refs/heads/master' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
+                  rustflags: ''
 
             - name: Install sqlx-cli
               uses: ./.github/actions/setup-sqlx-cli
