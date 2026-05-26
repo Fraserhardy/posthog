@@ -5127,23 +5127,8 @@
             "readOnlyHint": true
         }
     },
-    "signals-scout-emit-signal": {
-        "description": "Persist a finding to `SignalScoutRun.findings` and fire `emit_signal` with `source_product = signals_scout`. Idempotent on `(run_id, finding_id)` — a second call with the same `finding_id` short-circuits without re-firing the pipeline. Honors the team's `shadow_mode` flag.",
-        "category": "Signals",
-        "feature": "signals",
-        "summary": "Emit a finding for a run",
-        "title": "Emit a finding for a run",
-        "required_scopes": ["signal_scout_internal:write"],
-        "new_mcp": true,
-        "annotations": {
-            "destructiveHint": false,
-            "idempotentHint": true,
-            "openWorldHint": true,
-            "readOnlyHint": false
-        }
-    },
     "signals-scout-project-profile-get": {
-        "description": "Return a deterministic snapshot of \"what's true about this project\" — products in use, product intents (stuck onboardings), connected integrations, warehouse sources, signal source configs (split enabled/disabled), and existing inbox report counts. Singleton per team; the response reflects either the newest non-expired cached profile or a freshly-built one. Read this once at the start of a run (right after `llma-skill-get`) to orient on the team in one tool call instead of paginating through `inbox-source-configs-list` / `inbox-reports-list` / `read-data-schema` / `activity-log-list`. Distinct from `signals-scout-scratchpad-search`: profile is ground truth from authoritative tables; scratchpad is the scout's inferred learnings.",
+        "description": "Return a deterministic snapshot of \"what's true about this project\" — products in use, product intents (stuck onboardings), connected integrations, warehouse sources, signal source configs (split enabled/disabled), and existing inbox report counts. Singleton per team; the response reflects either the newest non-expired cached profile or a freshly-built one. Read this once at the start of a run (right after `llma-skill-get`) to orient on the team in one tool call instead of paginating through `inbox-source-configs-list` / `inbox-reports-list` / `read-data-schema` / `activity-log-list`. Distinct from `signals-scout-scratchpad-list`: profile is ground truth from authoritative tables; scratchpad is the scout's inferred learnings.",
         "category": "Signals",
         "feature": "signals",
         "summary": "Get the project profile",
@@ -5158,7 +5143,7 @@
         }
     },
     "signals-scout-runs-list": {
-        "description": "Return the most recent `SignalScoutRun` summaries for this project, newest first. Used by the headless scout to dedupe against work other runs already covered. ILIKE matches on `summary`; results capped at 100.",
+        "description": "Return the most recent `SignalScoutRun` summaries for this project, newest first. Used by the headless scout to dedupe against work other runs already covered. Pass `text` for a case-insensitive substring match on the run's `summary` (the primary dedupe key for runs that didn't emit findings). Pass `since` to scope to a recent window. Results capped at 100.",
         "category": "Signals",
         "feature": "signals",
         "summary": "List recent scout runs",
@@ -5173,7 +5158,7 @@
         }
     },
     "signals-scout-runs-retrieve": {
-        "description": "Return the full `SignalScoutRun` row including `summary`, `findings`, `hypotheses_considered`, `run_metrics`, and `metadata`. Strictly team-scoped — a UUID belonging to another team returns 404.",
+        "description": "Return the full `SignalScoutRun` row, including the agent's end-of-run `summary`. Status, timestamps, and error flow from the linked `tasks.TaskRun`; emitted findings live as `Signal` rows queryable by `source_id = run:<run_id>:finding:<finding_id>`. Strictly team-scoped — a UUID belonging to another team returns 404.",
         "category": "Signals",
         "feature": "signals",
         "summary": "Get a scout run by ID",
