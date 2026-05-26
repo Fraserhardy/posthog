@@ -24,13 +24,6 @@ jobs:
             published-version: ${{ steps.check-package-version.outputs.published-version }}
             is-new-version: ${{ steps.check-package-version.outputs.is-new-version }}
         steps:
-            - name: Use baked Git reference repo
-              if: runner.os == 'Linux'
-              shell: bash
-              run: |
-                  if [ -d /opt/git-reference/posthog.git/objects ]; then
-                      echo "GIT_ALTERNATE_OBJECT_DIRECTORIES=/opt/git-reference/posthog.git/objects" >> "$GITHUB_ENV"
-                  fi
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
                   fetch-depth: 0
@@ -79,13 +72,6 @@ jobs:
         if: needs.check-package-version.outputs.is-new-version == 'true' &&
             github.event.pull_request.head.repo.full_name == 'PostHog/posthog'
         steps:
-            - name: Use baked Git reference repo
-              if: runner.os == 'Linux'
-              shell: bash
-              run: |
-                  if [ -d /opt/git-reference/posthog.git/objects ]; then
-                      echo "GIT_ALTERNATE_OBJECT_DIRECTORIES=/opt/git-reference/posthog.git/objects" >> "$GITHUB_ENV"
-                  fi
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
             - name: Setup Emscripten for WASM build
@@ -113,13 +99,6 @@ jobs:
             contents: read
             id-token: write
         steps:
-            - name: Use baked Git reference repo
-              if: runner.os == 'Linux'
-              shell: bash
-              run: |
-                  if [ -d /opt/git-reference/posthog.git/objects ]; then
-                      echo "GIT_ALTERNATE_OBJECT_DIRECTORIES=/opt/git-reference/posthog.git/objects" >> "$GITHUB_ENV"
-                  fi
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
             - name: Download dist artifact

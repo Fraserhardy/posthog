@@ -36,13 +36,6 @@ jobs:
             installer_changed: ${{ steps.filter.outputs.installer }}
             label_removed: ${{ steps.check-label.outputs.label_removed }}
         steps:
-            - name: Use baked Git reference repo
-              if: runner.os == 'Linux'
-              shell: bash
-              run: |
-                  if [ -d /opt/git-reference/posthog.git/objects ]; then
-                      echo "GIT_ALTERNATE_OBJECT_DIRECTORIES=/opt/git-reference/posthog.git/objects" >> "$GITHUB_ENV"
-                  fi
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
             - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
@@ -339,13 +332,6 @@ jobs:
         needs: [wait-for-docker-image, changes]
         if: always() && ((needs.changes.outputs.should_run == 'true' && needs.wait-for-docker-image.outputs.conclusion == 'success') || github.event_name == 'push')
         steps:
-            - name: Use baked Git reference repo
-              if: runner.os == 'Linux'
-              shell: bash
-              run: |
-                  if [ -d /opt/git-reference/posthog.git/objects ]; then
-                      echo "GIT_ALTERNATE_OBJECT_DIRECTORIES=/opt/git-reference/posthog.git/objects" >> "$GITHUB_ENV"
-                  fi
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
                   clean: false

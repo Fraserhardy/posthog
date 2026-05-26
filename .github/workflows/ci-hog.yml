@@ -32,13 +32,6 @@ jobs:
         steps:
             # For pull requests it's not necessary to checkout the code, but we
             # also want this to run on master so we need to checkout
-            - name: Use baked Git reference repo
-              if: runner.os == 'Linux'
-              shell: bash
-              run: |
-                  if [ -d /opt/git-reference/posthog.git/objects ]; then
-                      echo "GIT_ALTERNATE_OBJECT_DIRECTORIES=/opt/git-reference/posthog.git/objects" >> "$GITHUB_ENV"
-                  fi
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
             - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
@@ -76,13 +69,6 @@ jobs:
             is-new-version: ${{ steps.check-package-version.outputs.is-new-version }}
 
         steps:
-            - name: Use baked Git reference repo
-              if: runner.os == 'Linux'
-              shell: bash
-              run: |
-                  if [ -d /opt/git-reference/posthog.git/objects ]; then
-                      echo "GIT_ALTERNATE_OBJECT_DIRECTORIES=/opt/git-reference/posthog.git/objects" >> "$GITHUB_ENV"
-                  fi
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
                   fetch-depth: 1
@@ -190,13 +176,6 @@ jobs:
             COMMITTED_VERSION: ${{ needs.hog-tests.outputs.committed-version }}
             PUBLISHED_VERSION: ${{ needs.hog-tests.outputs.published-version }}
         steps:
-            - name: Use baked Git reference repo
-              if: runner.os == 'Linux'
-              shell: bash
-              run: |
-                  if [ -d /opt/git-reference/posthog.git/objects ]; then
-                      echo "GIT_ALTERNATE_OBJECT_DIRECTORIES=/opt/git-reference/posthog.git/objects" >> "$GITHUB_ENV"
-                  fi
             - name: Checkout the repository
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:

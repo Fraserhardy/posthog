@@ -57,13 +57,6 @@ jobs:
         env:
             GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         steps:
-            - name: Use baked Git reference repo
-              if: runner.os == 'Linux'
-              shell: bash
-              run: |
-                  if [ -d /opt/git-reference/posthog.git/objects ]; then
-                      echo "GIT_ALTERNATE_OBJECT_DIRECTORIES=/opt/git-reference/posthog.git/objects" >> "$GITHUB_ENV"
-                  fi
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
                   submodules: recursive
@@ -127,13 +120,6 @@ jobs:
             - name: enable windows longpaths
               run: |
                   git config --global core.longpaths true
-            - name: Use baked Git reference repo
-              if: runner.os == 'Linux'
-              shell: bash
-              run: |
-                  if [ -d /opt/git-reference/posthog.git/objects ]; then
-                      echo "GIT_ALTERNATE_OBJECT_DIRECTORIES=/opt/git-reference/posthog.git/objects" >> "$GITHUB_ENV"
-                  fi
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
                   submodules: recursive
@@ -194,13 +180,6 @@ jobs:
             BUILD_MANIFEST_NAME: target/distrib/global-dist-manifest.json
             POSTHOG_API_TOKEN: ${{ secrets.POSTHOG_API_TOKEN }}
         steps:
-            - name: Use baked Git reference repo
-              if: runner.os == 'Linux'
-              shell: bash
-              run: |
-                  if [ -d /opt/git-reference/posthog.git/objects ]; then
-                      echo "GIT_ALTERNATE_OBJECT_DIRECTORIES=/opt/git-reference/posthog.git/objects" >> "$GITHUB_ENV"
-                  fi
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
                   submodules: recursive
@@ -256,13 +235,6 @@ jobs:
                   client-id: ${{ secrets.GH_APP_POSTHOG_RELEASER_APP_ID }}
                   private-key: ${{ secrets.GH_APP_POSTHOG_RELEASER_PRIVATE_KEY }}
 
-            - name: Use baked Git reference repo
-              if: runner.os == 'Linux'
-              shell: bash
-              run: |
-                  if [ -d /opt/git-reference/posthog.git/objects ]; then
-                      echo "GIT_ALTERNATE_OBJECT_DIRECTORIES=/opt/git-reference/posthog.git/objects" >> "$GITHUB_ENV"
-                  fi
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
                   submodules: recursive
@@ -329,13 +301,6 @@ jobs:
         permissions:
             id-token: write
         steps:
-            - name: Use baked Git reference repo
-              if: runner.os == 'Linux'
-              shell: bash
-              run: |
-                  if [ -d /opt/git-reference/posthog.git/objects ]; then
-                      echo "GIT_ALTERNATE_OBJECT_DIRECTORIES=/opt/git-reference/posthog.git/objects" >> "$GITHUB_ENV"
-                  fi
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
                   sparse-checkout: .nvmrc

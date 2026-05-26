@@ -32,13 +32,6 @@ jobs:
         # no-op anyway — skip the run entirely to avoid noise.
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         steps:
-            - name: Use baked Git reference repo
-              if: runner.os == 'Linux'
-              shell: bash
-              run: |
-                  if [ -d /opt/git-reference/posthog.git/objects ]; then
-                      echo "GIT_ALTERNATE_OBJECT_DIRECTORIES=/opt/git-reference/posthog.git/objects" >> "$GITHUB_ENV"
-                  fi
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
                   sparse-checkout: |
