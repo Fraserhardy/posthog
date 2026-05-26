@@ -1,4 +1,4 @@
-import * as d3 from 'd3'
+import { color as d3Color } from 'd3-color'
 import React, { useCallback, useMemo } from 'react'
 
 import { type BarChartPrivate, computeBarAtIndex, computeBarTrackRect, computeSeriesBars } from '../../core/bar-layout'
@@ -338,7 +338,7 @@ function BarChartInner<Meta = unknown>({
                     hoverPosition &&
                     cursorOutsideBarFillExtent(bar, hoverPosition, isHorizontal)
                 ) {
-                    const parsed = d3.color(s.color)
+                    const parsed = d3Color(s.color)
                     // Always translucent — falling back to `s.color` directly would paint
                     // an opaque full-plot-height block if d3 can't parse the series color.
                     let trackColor: string
@@ -355,7 +355,7 @@ function BarChartInner<Meta = unknown>({
                         barCornerRadius
                     )
                 } else {
-                    const highlightColor = d3.color(s.color)?.darker(0.6).toString() ?? s.color
+                    const highlightColor = d3Color(s.color)?.darker(0.6).toString() ?? s.color
                     drawBarHighlight(ctx, bar, highlightColor, barCornerRadius)
                 }
             }

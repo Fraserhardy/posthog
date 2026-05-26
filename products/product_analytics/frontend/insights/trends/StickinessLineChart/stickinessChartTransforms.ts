@@ -1,5 +1,5 @@
-import { DEFAULT_Y_AXIS_ID } from 'lib/hog-charts'
-import type { Series, TimeSeriesLineChartConfig, TooltipConfig, YAxisConfig } from 'lib/hog-charts'
+import { DEFAULT_Y_AXIS_ID } from '@posthog/quill-charts'
+import type { Series, TimeSeriesLineChartConfig, TooltipConfig, YAxisConfig } from '@posthog/quill-charts'
 
 // Shape both IndexedTrendResult (kea) and StickinessResultItem (MCP) satisfy.
 export interface StickinessResultLike {

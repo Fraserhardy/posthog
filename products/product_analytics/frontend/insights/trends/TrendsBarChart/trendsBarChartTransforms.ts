@@ -1,4 +1,4 @@
-import type { Series, TimeSeriesBarChartConfig } from 'lib/hog-charts'
+import type { Series, TimeSeriesBarChartConfig } from '@posthog/quill-charts'
 import { hexToRGBA } from 'lib/utils'
 import { COMPARE_PREVIOUS_DIM_OPACITY } from 'scenes/trends/viz/trendsAdapterConstants'
 
