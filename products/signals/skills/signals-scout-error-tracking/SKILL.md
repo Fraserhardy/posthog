@@ -8,9 +8,9 @@ description: >
   signals-scout-* fleet — no dependencies on other skills. Picked uniformly at random
   by the coordinator alongside `signals-scout-general` and other specialists.
 compatibility: >
-  Designed for the PostHog Signals agent in a Claude sandbox with read-only PostHog MCP
-  scopes. Assumes the signals-scout MCP family (project-profile-get, runs-list,
-  scratchpad-list, scratchpad-create, scratchpad-delete, runs-findings-create) plus
+  Designed for the PostHog Signals agent in a Claude sandbox with PostHog MCP scopes (mostly read-only, plus
+  signal_scout_internal:write for scratchpad-remember/forget and emit-signal). Assumes the signals-scout MCP family (project-profile-get, runs-list,
+  scratchpad-search, scratchpad-remember, scratchpad-forget, emit-signal) plus
   error-tracking + analytics tools (error-tracking-issues-list, error-tracking-issues-retrieve,
   execute-sql, activity-log-list, inbox-reports-list).
 metadata:

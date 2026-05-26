@@ -111,6 +111,33 @@ class TestDiscoverCanonicalSkills:
         with pytest.raises(CanonicalSkillParseError, match="both 'allowed-tools' and 'allowed_tools'"):
             discover_canonical_skills(tmp_path)
 
+    @pytest.mark.parametrize(
+        "allowed_tools_value",
+        [
+            # YAML null — `allowed-tools:` with no value.
+            "",
+            " false",
+            ' ""',
+        ],
+    )
+    def test_rejects_falsy_non_list_allowed_tools(self, tmp_path: Path, allowed_tools_value: str) -> None:
+        # A falsy-but-invalid value must fail fast, not silently fall back to `[]`
+        # (which means "no tool narrowing" and would broaden tool access).
+        _write_canonical_skill(
+            tmp_path,
+            dir_name="signals-scout-bar",
+            frontmatter=f"""
+                ---
+                name: signals-scout-bar
+                description: bar skill
+                allowed-tools:{allowed_tools_value}
+                ---
+            """,
+            body="# Bar\n",
+        )
+        with pytest.raises(CanonicalSkillParseError, match="must be a list of strings"):
+            discover_canonical_skills(tmp_path)
+
     def test_parses_bundled_files_under_allowed_subdirs(self, tmp_path: Path) -> None:
         # `_ALLOWED_BUNDLE_SUBDIRS` is kept in lockstep with `hogli build:skills` —
         # `references/` and `scripts/` only. `assets/` and any other subdir are intentionally

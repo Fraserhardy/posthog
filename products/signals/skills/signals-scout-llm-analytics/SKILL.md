@@ -8,9 +8,9 @@ description: >
   peer in the signals-scout-* fleet — no dependencies on other skills. Picked uniformly
   at random by the coordinator alongside `signals-scout-general` and other specialists.
 compatibility: >
-  Designed for the PostHog Signals agent in a Claude sandbox with read-only PostHog MCP
-  scopes. Assumes the signals-scout MCP family is available (project-profile-get, runs-list,
-  scratchpad-list, scratchpad-create, scratchpad-delete, runs-findings-create) plus
+  Designed for the PostHog Signals agent in a Claude sandbox with PostHog MCP scopes (mostly read-only, plus
+  signal_scout_internal:write for scratchpad-remember/forget and emit-signal). Assumes the signals-scout MCP family is available (project-profile-get, runs-list,
+  scratchpad-search, scratchpad-remember, scratchpad-forget, emit-signal) plus
   standard analytics + LLM tools (query-llm-traces-list, query-llm-trace, llma-evaluation-list,
   get-llm-total-costs-for-project).
 metadata:

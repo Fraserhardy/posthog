@@ -118,7 +118,15 @@ def _parse_canonical_skill(skill_dir: Path) -> CanonicalSkill:
         raise CanonicalSkillParseError(
             f"SKILL.md frontmatter has both 'allowed-tools' and 'allowed_tools'; pick one: {skill_file}"
         )
-    raw_allowed = frontmatter.get("allowed-tools") or frontmatter.get("allowed_tools") or []
+    # Branch on key presence rather than truthiness: a falsy-but-invalid value
+    # (`allowed-tools:` / null, `false`, `""`) must fail validation, not silently
+    # fall back to `[]` — which means "no narrowing" and would broaden tool access.
+    if "allowed-tools" in frontmatter:
+        raw_allowed = frontmatter["allowed-tools"]
+    elif "allowed_tools" in frontmatter:
+        raw_allowed = frontmatter["allowed_tools"]
+    else:
+        raw_allowed = []
     if not isinstance(raw_allowed, list) or not all(isinstance(t, str) for t in raw_allowed):
         # Mention both accepted keys. The validator runs after we've merged the two forms
         # above, so we can't tell which the author wrote — naming only the spec form would

@@ -9,9 +9,9 @@ description: >
   Picked uniformly at random by the coordinator alongside `signals-scout-general` and
   other specialists.
 compatibility: >
-  Designed for the PostHog Signals agent in a Claude sandbox with read-only PostHog MCP
-  scopes. Assumes the signals-scout MCP family is available (project-profile-get, runs-list,
-  scratchpad-list, scratchpad-create, scratchpad-delete, runs-findings-create) plus
+  Designed for the PostHog Signals agent in a Claude sandbox with PostHog MCP scopes (mostly read-only, plus
+  signal_scout_internal:write for scratchpad-remember/forget and emit-signal). Assumes the signals-scout MCP family is available (project-profile-get, runs-list,
+  scratchpad-search, scratchpad-remember, scratchpad-forget, emit-signal) plus
   the logs tool family (logs-count, logs-count-ranges, logs-sparkline-query, query-logs,
   logs-attributes-list, logs-attribute-values-list, logs-alerts-list).
 metadata:
