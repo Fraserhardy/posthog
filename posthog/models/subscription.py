@@ -13,6 +13,9 @@ from dateutil.rrule import DAILY, FR, MO, MONTHLY, SA, SU, TH, TU, WE, WEEKLY, Y
 from posthog.constants import AvailableFeature
 from posthog.exceptions_capture import capture_exception
 from posthog.jwt import PosthogJwtAudience, decode_jwt, encode_jwt
+from posthog.models.activity_logging.activity_log import Detail, changes_between, log_activity
+from posthog.models.activity_logging.model_activity import ModelActivityMixin
+from posthog.models.signals import model_activity_signal, mutable_receiver
 from posthog.models.utils import UUIDModel
 from posthog.utils import absolute_uri
 
@@ -20,6 +23,9 @@ if TYPE_CHECKING:
     from posthog.models.organization import Organization
 
 UNSUBSCRIBE_TOKEN_EXP_DAYS = 30
+
+# Max length of the prompt snippet used as an AI subscription's display name when it has no title.
+AI_PROMPT_DISPLAY_MAX_LEN = 60
 
 RRULE_WEEKDAY_MAP = {
     "monday": MO,
@@ -41,7 +47,7 @@ class SubscriptionResourceInfo:
     url: str
 
 
-class Subscription(models.Model):
+class Subscription(ModelActivityMixin, models.Model):
     """
     Rather than re-invent the wheel, we are roughly following the iCalender format for recurring schedules
     https://dateutil.readthedocs.io/en/stable/rrule.html
@@ -69,10 +75,10 @@ class Subscription(models.Model):
         SATURDAY = "saturday"
         SUNDAY = "sunday"
 
-    class ContentType(models.TextChoices):
+    class ResourceType(models.TextChoices):
         INSIGHT = "insight"
         DASHBOARD = "dashboard"
-        AI_PROMPT = "ai_prompt"
+        AI_PROMPT = "ai_prompt", "AI prompt"
 
     RRULE_FIELDS = {"frequency", "count", "interval", "start_date", "until_date", "bysetpos", "byweekday"}
 
@@ -83,10 +89,10 @@ class Subscription(models.Model):
         SubscriptionFrequency.YEARLY: YEARLY,
     }
 
-    content_type = models.CharField(
+    resource_type = models.CharField(
         max_length=20,
-        choices=ContentType.choices,
-        default=ContentType.INSIGHT,
+        choices=ResourceType.choices,
+        default=ResourceType.INSIGHT,
         db_index=False,
     )
 
@@ -108,7 +114,6 @@ class Subscription(models.Model):
     )
 
     prompt = models.TextField(null=True, blank=True)
-    ai_config = models.JSONField(null=True, blank=True, default=None)
 
     # Subscription type (email, slack etc.)
     title = models.CharField(max_length=100, null=True, blank=True)
@@ -252,7 +257,7 @@ class Subscription(models.Model):
             return absolute_uri(f"/insights/{self.insight.short_id}/subscriptions/{self.id}")
         elif self.dashboard:
             return absolute_uri(f"/dashboard/{self.dashboard_id}/subscriptions/{self.id}")
-        elif self.content_type == self.ContentType.AI_PROMPT:
+        elif self.resource_type == self.ResourceType.AI_PROMPT:
             return absolute_uri(f"/project/{self.team_id}/subscriptions/{self.id}")
         return None
 
@@ -266,11 +271,15 @@ class Subscription(models.Model):
             )
         elif self.dashboard:
             return SubscriptionResourceInfo("Dashboard", self.dashboard.name or "Dashboard", self.dashboard.url)
-        elif self.content_type == self.ContentType.AI_PROMPT:
-            display = self.title or (self.prompt or "")[:60] or "AI report"
-            return SubscriptionResourceInfo("AI Report", display, self.url or "")
+        elif self.resource_type == self.ResourceType.AI_PROMPT:
+            # "AI" (not "AI report") because callers append the noun, e.g. f"PostHog {kind} report".
+            return SubscriptionResourceInfo("AI", self.ai_display_name, self.url or "")
 
         return None
+
+    @property
+    def ai_display_name(self) -> str:
+        return self.title or (self.prompt or "").strip()[:AI_PROMPT_DISPLAY_MAX_LEN] or "AI report"
 
     @property
     def summary(self):
@@ -312,7 +321,7 @@ class Subscription(models.Model):
         """
         return {
             "id": self.id,
-            "content_type": self.content_type,
+            "resource_type": self.resource_type,
             "target_type": self.target_type,
             "num_emails_invited": len(self.target_value.split(",")) if self.target_type == "email" else None,
             "frequency": self.frequency,
@@ -331,31 +340,33 @@ def subscription_saved(sender, instance, created, raw, using, **kwargs):
         event_name: str = f"{instance.resource_info.kind.lower()} subscription {'created' if created else 'updated'}"
         report_user_action(instance.created_by, event_name, instance.get_analytics_metadata())
 
-    # AI subscriptions carry higher blast radius (prompts can spend money, output is LLM-authored)
-    # so we record them in the activity log even though insight/dashboard subscriptions are not.
-    if instance.content_type != Subscription.ContentType.AI_PROMPT or not instance.created_by:
-        return
-    # Skip scheduler-driven saves — those only touch `next_delivery_date` and attributing them
-    # to `created_by` would produce a misleading audit trail.
-    update_fields = kwargs.get("update_fields")
-    is_scheduler_save = update_fields is not None and set(update_fields) <= {"next_delivery_date"}
-    if not created and is_scheduler_save:
-        return
-    try:
-        from posthog.models.activity_logging.activity_log import Detail, log_activity
 
+@mutable_receiver(model_activity_signal, sender=Subscription)
+def log_ai_subscription_activity(
+    sender, scope, before_update, after_update, activity, user, was_impersonated=False, **kwargs
+):
+    # AI subscriptions carry higher blast radius (prompts can spend money, output is LLM-authored),
+    # so we record them in the activity log even though insight/dashboard subscriptions are not.
+    instance = after_update or before_update
+    if instance is None or instance.resource_type != Subscription.ResourceType.AI_PROMPT or not instance.created_by:
+        return
+
+    # Scheduler saves that only touch `next_delivery_date` never reach here: `signal_exclusions`
+    # suppresses the signal whether or not the save passes `update_fields` (the mixin's
+    # changed-fields check honours the exclusion list), so a schedule bump is not logged.
+    changes = changes_between("Subscription", previous=before_update, current=after_update)
+    try:
         log_activity(
             organization_id=instance.team.organization_id,
             team_id=instance.team_id,
-            user=instance.created_by,
-            was_impersonated=False,
+            user=user,
+            was_impersonated=was_impersonated,
             item_id=instance.id,
             scope="Subscription",
-            activity="created" if created else "updated",
+            activity=activity,
             detail=Detail(
-                name=instance.title or (instance.prompt or "")[:60],
-                short_id=None,
-                changes=None,
+                name=instance.ai_display_name,
+                changes=changes,
             ),
         )
     except Exception as exc:  # never let activity logging break a save
