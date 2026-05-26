@@ -286,7 +286,15 @@ jobs:
               if: github.event_name == 'pull_request'
               env:
                   BASE_REF: ${{ github.event.pull_request.base.ref }}
+                  HEAD_REF: ${{ github.event.pull_request.head.ref }}
+                  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
               run: |
+                  if [ "$HEAD_REF" = "rory/test-hetzner-runners" ]; then
+                      echo "key=posthog-schema-branch-${HEAD_SHA}" >> $GITHUB_OUTPUT
+                      echo "::notice::using schema cache from ${HEAD_REF}@${HEAD_SHA}"
+                      exit 0
+                  fi
+
                   # HEAD is the synthetic merge commit; HEAD^2 is the PR branch tip.
                   # The fetch-depth:1000 checkout + base-ref fetch above ensure the
                   # full ancestry needed to find the divergence point is available.
@@ -986,7 +994,7 @@ jobs:
                     sqlx migrate run --source rust/persons_migrations/
 
             - name: Dump migrated schema
-              if: github.event_name == 'push'
+              if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'rory/test-hetzner-runners')
               run: |
                   set -e
                   set -o pipefail
@@ -998,7 +1006,7 @@ jobs:
                   gunzip -t schema.sql.gz
 
             - name: Upload migrated schema artifact
-              if: github.event_name == 'push'
+              if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'rory/test-hetzner-runners')
               uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
               with:
                   name: migrated-schema
@@ -1009,12 +1017,14 @@ jobs:
               # Seeds a Postgres schema cache consumed by PR test jobs (turbo-tests,
               # django, dagster). PR jobs restore using the merge-base SHA as the key
               # so they always get a schema from their exact branch point rather than
-              # the newest master. LRU eviction handles cleanup.
-              if: github.event_name == 'push'
+              # the newest master. The temporary runner perf branch stores by PR head
+              # SHA so the open PR can seed and consume its own cache. LRU eviction
+              # handles cleanup.
+              if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'rory/test-hetzner-runners')
               uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
               with:
                   path: schema.sql.gz
-                  key: posthog-schema-master-${{ github.sha }}
+                  key: posthog-schema-${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'rory/test-hetzner-runners' && 'branch' || 'master' }}-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
             - name: Check migrations
               # Skip migration safety check on master push (no migration_files from path filter)

@@ -292,6 +292,7 @@ jobs:
                   DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/posthog'
                   BEHAVIORAL_COHORTS_DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/test_behavioral_cohorts'
                   GH_TOKEN: ${{ github.token }}
+                  POSTHOG_SCHEMA_RESTORE_BASE_BRANCH: ${{ github.event.pull_request.head.ref == 'rory/test-hetzner-runners' && 'rory/test-hetzner-runners' || 'master' }}
               run: |
                   # Download pre-migrated schema from CI
                   ./bin/hogli db:download-schema

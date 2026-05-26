@@ -55,9 +55,6 @@ runs:
               builder: ${{ steps.buildx.outputs.name }}
               cache-scope: posthog
 
-        - name: Set up QEMU
-          uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
-
         - name: Configure AWS credentials
           if: ${{ inputs.push-image == 'true' }}
           uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
@@ -100,7 +97,7 @@ runs:
           with:
               context: .
               tags: ${{ steps.emit.outputs.tag }}
-              platforms: linux/amd64,linux/arm64
+              platforms: linux/amd64
               build-args: COMMIT_HASH=${{ github.sha }}
               push: ${{ inputs.push-image }}
               no-cache: ${{ inputs.no-cache }}

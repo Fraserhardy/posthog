@@ -104,12 +104,6 @@ jobs:
               working-directory: .
               run: cp -r proto rust/proto
 
-            - name: Set up QEMU
-              uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
-              with:
-                  image: tonistiigi/binfmt:qemu-v10.2.1@sha256:7c76af7ed8714b80e3fc6d6d1c748ebcac867ad6b631167d0a6d3d92952151ea
-                  platforms: all
-
             - name: Login to ghcr.io
               uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
               with:
@@ -144,7 +138,7 @@ jobs:
                   push: true
                   tags: ${{ steps.meta.outputs.tags }}
                   labels: ${{ steps.meta.outputs.labels }}
-                  platforms: linux/arm64,linux/amd64
+                  platforms: linux/amd64
                   build-args: |
                       SCCACHE_LOG=debug
                       SCCACHE_NO_DAEMON=1

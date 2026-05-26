@@ -89,9 +89,6 @@ jobs:
                   builder: ${{ steps.buildx.outputs.name }}
                   cache-scope: posthog-recording-rasterizer
 
-            - name: Set up QEMU
-              uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
-
             - name: Docker meta and registry login
               id: docker-meta
               uses: ./.github/actions/docker-meta

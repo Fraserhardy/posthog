@@ -45,9 +45,6 @@ jobs:
                   builder: ${{ steps.buildx.outputs.name }}
                   cache-scope: posthog
 
-            - name: Set up QEMU
-              uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
-
             - name: Docker meta and registry login
               id: docker-meta
               uses: ./.github/actions/docker-meta
@@ -67,7 +64,7 @@ jobs:
                   push: true
                   tags: ${{ steps.docker-meta.outputs.tags }}
                   labels: ${{ steps.docker-meta.outputs.labels }}
-                  platforms: linux/arm64,linux/amd64
+                  platforms: linux/amd64
                   build-args: |
                       COMMIT_HASH=${{ github.sha }}
                       BUILDKIT_CONTEXT_KEEP_GIT_DIR=1

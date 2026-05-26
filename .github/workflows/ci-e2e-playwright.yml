@@ -169,7 +169,15 @@ jobs:
               if: steps.decide.outputs.shouldRun == 'true' && github.event_name == 'pull_request'
               env:
                   BASE_REF: ${{ github.event.pull_request.base.ref }}
+                  HEAD_REF: ${{ github.event.pull_request.head.ref }}
+                  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
               run: |
+                  if [ "$HEAD_REF" = "rory/test-hetzner-runners" ]; then
+                      echo "key=posthog-schema-branch-${HEAD_SHA}" >> $GITHUB_OUTPUT
+                      echo "::notice::using schema cache from ${HEAD_REF}@${HEAD_SHA}"
+                      exit 0
+                  fi
+
                   # HEAD is the synthetic merge commit; HEAD^2 is the PR branch tip.
                   MERGE_BASE=$(git merge-base HEAD^2 "origin/${BASE_REF}" 2>/dev/null || echo "")
                   if [ -n "$MERGE_BASE" ]; then

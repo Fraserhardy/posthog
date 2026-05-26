@@ -416,7 +416,15 @@ jobs:
               if: github.event_name == 'pull_request'
               env:
                   BASE_REF: ${{ github.event.pull_request.base.ref }}
+                  HEAD_REF: ${{ github.event.pull_request.head.ref }}
+                  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
               run: |
+                  if [ "$HEAD_REF" = "rory/test-hetzner-runners" ]; then
+                      echo "key=posthog-schema-branch-${HEAD_SHA}" >> $GITHUB_OUTPUT
+                      echo "::notice::using schema cache from ${HEAD_REF}@${HEAD_SHA}"
+                      exit 0
+                  fi
+
                   # HEAD is the synthetic merge commit; HEAD^2 is the PR branch tip.
                   # The fetch-depth:1000 checkout + base-ref fetch above ensure the
                   # full ancestry needed to find the divergence point is available.
