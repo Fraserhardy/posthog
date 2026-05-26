@@ -1,0 +1,68 @@
+import typing
+
+from django.conf import settings
+
+from temporalio import activity
+from temporalio.worker import ActivityInboundInterceptor, ExecuteActivityInput, Interceptor
+
+from posthog.temporal.llm_analytics.metrics import ExecutionTimeRecorder, get_metric_meter
+from posthog.temporal.session_replay.surfacing_scoring_sweep.constants import WORKFLOW_NAME
+
+SURFACING_SCORING_LATENCY_HISTOGRAM_METRICS = ("surfacing_scoring_score_chunk_activity_execution_latency",)
+SURFACING_SCORING_LATENCY_HISTOGRAM_BUCKETS = [
+    1_000.0,  # 1 second
+    5_000.0,  # 5 seconds
+    10_000.0,  # 10 seconds
+    30_000.0,  # 30 seconds
+    60_000.0,  # 1 minute
+    120_000.0,  # 2 minutes
+    240_000.0,  # 4 minutes (activity timeout)
+]
+
+SURFACING_SCORING_ACTIVITY_TYPES = {
+    "list_chunks_activity",
+    "score_chunk_activity",
+}
+
+SURFACING_SCORING_WORKFLOW_TYPES = {
+    WORKFLOW_NAME,
+}
+
+
+def record_tick_summary(*, total_scored: int, chunks_failed: int) -> None:
+    if total_scored <= 0 and chunks_failed <= 0:
+        return
+    meter = get_metric_meter()
+    if total_scored > 0:
+        meter.create_counter(
+            "surfacing_scoring_total_scored",
+            "Sessions scored in a surfacing scoring sweep tick",
+        ).add(total_scored)
+    if chunks_failed > 0:
+        meter.create_counter(
+            "surfacing_scoring_chunks_failed",
+            "Hash-partitioned chunks that failed in a surfacing scoring sweep tick",
+        ).add(chunks_failed)
+
+
+class SurfacingScoringMetricsInterceptor(Interceptor):
+    task_queue = settings.SURFACING_SCORING_SWEEP_TASK_QUEUE
+
+    def intercept_activity(self, next: ActivityInboundInterceptor) -> ActivityInboundInterceptor:
+        return _SurfacingScoringActivityInterceptor(super().intercept_activity(next))
+
+
+class _SurfacingScoringActivityInterceptor(ActivityInboundInterceptor):
+    async def execute_activity(self, input: ExecuteActivityInput) -> typing.Any:
+        activity_type = activity.info().activity_type
+        if activity_type not in SURFACING_SCORING_ACTIVITY_TYPES:
+            return await super().execute_activity(input)
+
+        if activity_type == "score_chunk_activity":
+            with ExecutionTimeRecorder(
+                "surfacing_scoring_score_chunk_activity_execution_latency",
+                description="Wall time for score_chunk_activity (fetch, predict, publish)",
+            ):
+                return await super().execute_activity(input)
+
+        return await super().execute_activity(input)
