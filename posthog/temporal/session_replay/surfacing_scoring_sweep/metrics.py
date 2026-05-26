@@ -6,9 +6,10 @@ from temporalio import activity
 from temporalio.worker import ActivityInboundInterceptor, ExecuteActivityInput, Interceptor
 
 from posthog.temporal.llm_analytics.metrics import ExecutionTimeRecorder, get_metric_meter
-from posthog.temporal.session_replay.surfacing_scoring_sweep.constants import WORKFLOW_NAME
 
-SURFACING_SCORING_LATENCY_HISTOGRAM_METRICS = ("surfacing_scoring_score_chunk_activity_execution_latency",)
+SCORE_CHUNK_LATENCY_HISTOGRAM = "surfacing_scoring_score_chunk_activity_execution_latency"
+
+SURFACING_SCORING_LATENCY_HISTOGRAM_METRICS = (SCORE_CHUNK_LATENCY_HISTOGRAM,)
 SURFACING_SCORING_LATENCY_HISTOGRAM_BUCKETS = [
     1_000.0,  # 1 second
     5_000.0,  # 5 seconds
@@ -16,17 +17,14 @@ SURFACING_SCORING_LATENCY_HISTOGRAM_BUCKETS = [
     30_000.0,  # 30 seconds
     60_000.0,  # 1 minute
     120_000.0,  # 2 minutes
-    240_000.0,  # 4 minutes (activity timeout)
+    240_000.0,  # 4 minutes (SCORE_CHUNK_ACTIVITY_TIMEOUT)
 ]
 
-SURFACING_SCORING_ACTIVITY_TYPES = {
-    "list_chunks_activity",
-    "score_chunk_activity",
-}
+TOTAL_SCORED_COUNTER = "surfacing_scoring_total_scored"
+TOTAL_SCORED_DESCRIPTION = "Sessions scored in a surfacing scoring sweep tick"
 
-SURFACING_SCORING_WORKFLOW_TYPES = {
-    WORKFLOW_NAME,
-}
+CHUNKS_FAILED_COUNTER = "surfacing_scoring_chunks_failed"
+CHUNKS_FAILED_DESCRIPTION = "Hash-partitioned chunks that failed in a surfacing scoring sweep tick"
 
 
 def record_tick_summary(*, total_scored: int, chunks_failed: int) -> None:
@@ -34,15 +32,9 @@ def record_tick_summary(*, total_scored: int, chunks_failed: int) -> None:
         return
     meter = get_metric_meter()
     if total_scored > 0:
-        meter.create_counter(
-            "surfacing_scoring_total_scored",
-            "Sessions scored in a surfacing scoring sweep tick",
-        ).add(total_scored)
+        meter.create_counter(TOTAL_SCORED_COUNTER, TOTAL_SCORED_DESCRIPTION).add(total_scored)
     if chunks_failed > 0:
-        meter.create_counter(
-            "surfacing_scoring_chunks_failed",
-            "Hash-partitioned chunks that failed in a surfacing scoring sweep tick",
-        ).add(chunks_failed)
+        meter.create_counter(CHUNKS_FAILED_COUNTER, CHUNKS_FAILED_DESCRIPTION).add(chunks_failed)
 
 
 class SurfacingScoringMetricsInterceptor(Interceptor):
@@ -54,15 +46,10 @@ class SurfacingScoringMetricsInterceptor(Interceptor):
 
 class _SurfacingScoringActivityInterceptor(ActivityInboundInterceptor):
     async def execute_activity(self, input: ExecuteActivityInput) -> typing.Any:
-        activity_type = activity.info().activity_type
-        if activity_type not in SURFACING_SCORING_ACTIVITY_TYPES:
+        if activity.info().activity_type != "score_chunk_activity":
             return await super().execute_activity(input)
-
-        if activity_type == "score_chunk_activity":
-            with ExecutionTimeRecorder(
-                "surfacing_scoring_score_chunk_activity_execution_latency",
-                description="Wall time for score_chunk_activity (fetch, predict, publish)",
-            ):
-                return await super().execute_activity(input)
-
-        return await super().execute_activity(input)
+        with ExecutionTimeRecorder(
+            SCORE_CHUNK_LATENCY_HISTOGRAM,
+            description="Wall time for score_chunk_activity (fetch, predict, publish)",
+        ):
+            return await super().execute_activity(input)
