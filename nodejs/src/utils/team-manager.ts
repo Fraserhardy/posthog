@@ -115,6 +115,7 @@ export class TeamManager {
                 t.heatmaps_opt_in,
                 t.ingested_event,
                 t.person_display_name_properties,
+                -- DEPRECATED: kept for rollback symmetry with the Team type; no live code reads it.
                 t.cookieless_server_hash_mode,
                 t.timezone,
                 t.logs_settings,

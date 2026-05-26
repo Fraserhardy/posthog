@@ -58,6 +58,7 @@ pub struct Team {
     pub session_recording_event_trigger_config: Option<Vec<Option<String>>>,
     pub session_recording_trigger_match_type_config: Option<String>,
     pub recording_domains: Option<Vec<String>>,
+    /// DEPRECATED: kept for rollback symmetry with the database column; no live code reads it.
     pub cookieless_server_hash_mode: Option<i16>,
     #[serde(default = "default_timezone")]
     pub timezone: String,

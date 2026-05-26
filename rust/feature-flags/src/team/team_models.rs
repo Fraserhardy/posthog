@@ -41,6 +41,7 @@ pub struct Team {
     pub session_recording_event_trigger_config: Option<Vec<Option<String>>>, // text[] in postgres. NB: this also contains NULL entries along with strings.
     pub session_recording_trigger_match_type_config: Option<String>, // character varying(24) in postgres
     pub recording_domains: Option<Vec<String>>, // character varying(200)[] in postgres
+    /// DEPRECATED: kept for rollback symmetry with the database column; no live code reads it.
     #[serde(default, with = "option_i16_as_i16")]
     pub cookieless_server_hash_mode: Option<i16>,
     #[serde(default = "default_timezone")]
