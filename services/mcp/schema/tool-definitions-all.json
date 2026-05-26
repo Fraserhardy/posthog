@@ -5128,7 +5128,7 @@
         }
     },
     "signals-scout-emit-signal": {
-        "description": "Persist a finding to `SignalScoutRun.findings` and fire `emit_signal` with `source_product = signals_scout`. Idempotent on `(run_id, finding_id)` — a second call with the same `finding_id` short-circuits without re-firing the pipeline. Honors the team's `shadow_mode` flag.",
+        "description": "Fire `emit_signal` with `source_product = signals_scout`. The `finding_id` is baked into the deterministic `Signal.source_id = run:<id>:finding:<id>` for traceability, but this is NOT idempotent — a second call with the same `finding_id` emits a second signal, so emit each finding exactly once and never retry an emit.",
         "category": "Signals",
         "feature": "signals",
         "summary": "Emit a finding for a run",
@@ -5137,7 +5137,7 @@
         "new_mcp": true,
         "annotations": {
             "destructiveHint": false,
-            "idempotentHint": true,
+            "idempotentHint": false,
             "openWorldHint": true,
             "readOnlyHint": false
         }
