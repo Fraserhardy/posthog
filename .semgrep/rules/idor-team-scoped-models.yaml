@@ -198,6 +198,9 @@ rules:
                               |SignalReportTask
                               |SignalTeamConfig
                               |SignalSourceConfig
+                              |SignalScoutConfig
+                              |SignalScoutRun
+                              |SignalScratchpad
                               |SingleSessionSummary
                               |SlackThreadTaskMapping
                               |SourceBatch
@@ -421,6 +424,9 @@ rules:
                         |SignalReportTask
                         |SignalTeamConfig
                         |SignalSourceConfig
+                        |SignalScoutConfig
+                        |SignalScoutRun
+                        |SignalScratchpad
                         |SingleSessionSummary
                         |SlackThreadTaskMapping
                         |SourceBatch
