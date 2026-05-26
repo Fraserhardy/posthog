@@ -130,6 +130,97 @@ export const SignalsScoutRunsRetrieveParams = /* @__PURE__ */ zod.object({
 })
 
 /**
+ * Fire `emit_signal` with `source_product = signals_scout`. The `finding_id` is baked into the deterministic `Signal.source_id = run:<id>:finding:<id>` for traceability, but this is NOT idempotent — a second call with the same `finding_id` emits a second signal, so do not retry an emit that may have already succeeded.
+ * @summary Emit a finding for a run
+ */
+export const SignalsScoutEmitSignalParams = /* @__PURE__ */ zod.object({
+    id: zod.string().describe('A UUID string identifying this Signal scout run.'),
+    project_id: zod
+        .string()
+        .describe(
+            "Project ID of the project you're trying to access. To find the ID of the project, make a call to /api/projects/."
+        ),
+})
+
+export const signalsScoutEmitSignalBodyWeightMin = 0
+export const signalsScoutEmitSignalBodyWeightMax = 1
+
+export const signalsScoutEmitSignalBodyConfidenceMin = 0
+export const signalsScoutEmitSignalBodyConfidenceMax = 1
+
+export const signalsScoutEmitSignalBodyEvidenceMax = 20
+
+export const SignalsScoutEmitSignalBody = /* @__PURE__ */ zod
+    .object({
+        description: zod.string().describe("Canonical evidence-bundle prose. Becomes the signal's `description`."),
+        weight: zod
+            .number()
+            .min(signalsScoutEmitSignalBodyWeightMin)
+            .max(signalsScoutEmitSignalBodyWeightMax)
+            .describe("Agent's weight for the signal in [0, 1]. Drives ranking in the inbox."),
+        confidence: zod
+            .number()
+            .min(signalsScoutEmitSignalBodyConfidenceMin)
+            .max(signalsScoutEmitSignalBodyConfidenceMax)
+            .describe("Agent's confidence the finding is real in [0, 1]. Persisted in `extra`."),
+        evidence: zod
+            .array(
+                zod
+                    .object({
+                        source_product: zod
+                            .string()
+                            .describe(
+                                'Source the citation came from (`error_tracking`, `session_replay`, `logs`, ...).'
+                            ),
+                        summary: zod
+                            .string()
+                            .describe('One-sentence prose about why this evidence supports the finding.'),
+                        entity_id: zod
+                            .string()
+                            .nullish()
+                            .describe('Optional ID of the cited entity (issue id, recording id, log query id).'),
+                    })
+                    .describe('One citation attached to a finding. Mirrors `SignalsScoutEvidenceEntry`.')
+            )
+            .max(signalsScoutEmitSignalBodyEvidenceMax)
+            .describe('Citations supporting the finding. Capped at 20 entries.'),
+        hypothesis: zod.string().nullish().describe('Optional one-line hypothesis the finding tests.'),
+        severity: zod
+            .union([
+                zod
+                    .enum(['P0', 'P1', 'P2', 'P3', 'P4'])
+                    .describe('* `P0` - P0\n* `P1` - P1\n* `P2` - P2\n* `P3` - P3\n* `P4` - P4'),
+                zod.null(),
+            ])
+            .optional()
+            .describe(
+                'Optional severity tag — one of P0, P1, P2, P3, P4. Informational only.\n\n* `P0` - P0\n* `P1` - P1\n* `P2` - P2\n* `P3` - P3\n* `P4` - P4'
+            ),
+        dedupe_keys: zod
+            .array(zod.string())
+            .optional()
+            .describe('Optional keys for downstream dedupe (e.g. `error_tracking_issue:<id>`).'),
+        time_range: zod
+            .union([
+                zod.object({
+                    date_from: zod.string().describe("ISO-8601 inclusive lower bound for the finding's window."),
+                    date_to: zod.string().describe("ISO-8601 inclusive upper bound for the finding's window."),
+                }),
+                zod.null(),
+            ])
+            .optional()
+            .describe('Optional time window the finding refers to.'),
+        mcp_trace_id: zod.string().nullish().describe('Optional MCP trace id for cross-system debugging.'),
+        finding_id: zod
+            .string()
+            .nullish()
+            .describe(
+                "Stable id for this finding, baked into the signal's source_id for traceability. NOT a dedupe key — re-emitting the same id creates another signal."
+            ),
+    })
+    .describe('Request body for `emit-finding`. Run attribution is taken from the URL path.')
+
+/**
  * Return `SignalScratchpad` entries for this project. ILIKE matches on `content` and `key`.
  * @summary Search the scout scratchpad
  */
