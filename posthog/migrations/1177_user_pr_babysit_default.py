@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("posthog", "1176_backfill_credentials_reviewed_at"),
+        ("posthog", "1176_migrate_web_analytics_models"),
     ]
 
     # db_default keeps the Postgres-level DEFAULT (Django would otherwise emit
