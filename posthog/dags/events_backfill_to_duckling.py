@@ -32,8 +32,12 @@ Partition Strategy:
 Iceberg dual-write:
     Teams in ICEBERG_BACKFILL_TEAM_IDS additionally dual-write each exported
     Parquet file into their Iceberg (Lakekeeper) catalog alongside DuckLake.
-    Iceberg has no add_data_files equivalent, so the duckgres worker re-reads the
-    Parquet from S3 and writes Iceberg data + metadata via INSERT ... SELECT. The
+    Iceberg has no add_data_files equivalent — there is no metadata-only register
+    path in either the DuckDB Iceberg extension or DuckLake's COPY-to-Iceberg (a
+    deep copy), so the duckgres worker re-reads the Parquet from S3 and rewrites
+    Iceberg data + metadata via INSERT ... SELECT. Each partition is DELETEd before
+    re-insert so re-runs replace rather than duplicate; if the DELETE fails the
+    INSERT is skipped (Iceberg left untouched) rather than risk duplicate rows. The
     Iceberg path is best-effort: any failure is logged but never aborts the
     DuckLake backfill, which remains the source of truth for every team.
 """
@@ -108,6 +112,16 @@ def iceberg_enabled_for_team(team_id: int) -> bool:
 # statement_timeout bounds query execution to prevent hung Dagster workers.
 DUCKGRES_CONNECT_TIMEOUT = 10  # seconds
 DUCKGRES_STATEMENT_TIMEOUT_MS = 300_000  # 5 minutes
+
+# The DuckLake write path (ducklake_add_data_files) is metadata-only and fast, so
+# the 5-minute default is plenty. The Iceberg dual-write, by contrast, has no
+# metadata-only register path (see write_partition_to_iceberg) — the duckgres
+# worker re-reads the Parquet and rewrites Iceberg data files, which for a large
+# partition can run well past 5 minutes. Give that INSERT its own, more generous
+# timeout so a slow rewrite degrades into a normal completion instead of a silent
+# timeout that leaves Iceberg gaps. Applied best-effort per statement and reset
+# afterwards; if duckgres rejects a runtime SET, we fall back to the default.
+DUCKGRES_ICEBERG_STATEMENT_TIMEOUT_MS = 1_800_000  # 30 minutes
 
 
 @retry(
@@ -1251,6 +1265,21 @@ def register_persons_file_with_duckling(
     return True
 
 
+def _set_statement_timeout(conn: psycopg.Connection[Any], timeout_ms: int) -> bool:
+    """Best-effort `SET statement_timeout` on the duckgres session.
+
+    Returns True if the SET itself raised (e.g. duckgres doesn't honour a runtime
+    SET), in which case the caller should leave the timeout alone — the session
+    keeps whatever it had. Returns False when the SET applied cleanly.
+    """
+    try:
+        conn.execute(f"SET statement_timeout = {int(timeout_ms)}")
+        return False
+    except Exception as exc:
+        logger.debug("duckling_iceberg_set_timeout_unsupported", timeout_ms=timeout_ms, error=str(exc))
+        return True
+
+
 def drop_iceberg_table(
     context: AssetExecutionContext,
     conn: psycopg.Connection[Any],
@@ -1332,19 +1361,28 @@ def write_partition_to_iceberg(
 ) -> bool:
     """Dual-write one exported Parquet file into the team's Iceberg table.
 
-    Iceberg has no `ducklake_add_data_files` equivalent — the only write path is
-    `INSERT ... SELECT`, so the duckgres worker re-reads the Parquet from S3 and
-    writes Iceberg data + metadata itself. `BY NAME` matches on column name so we
-    don't depend on column ordering.
+    Iceberg has no `ducklake_add_data_files` equivalent. Neither DuckDB's Iceberg
+    extension (write support is INSERT/UPDATE/DELETE only — no metadata-only
+    `add_files`) nor DuckLake's `COPY FROM DATABASE ... TO iceberg` (an explicit
+    deep copy) can register the already-written Parquet by reference. The only
+    write path is therefore `INSERT ... SELECT`: the duckgres worker re-reads the
+    Parquet from S3 and rewrites Iceberg data + metadata itself. This rewrite is
+    inherent, not an oversight — revisit only if a metadata-only register lands in
+    the DuckDB Iceberg extension. `BY NAME` matches on column name so we don't
+    depend on column ordering.
 
-    Idempotency is best-effort: we attempt a partition-scoped DELETE first, but
-    DuckDB's Iceberg extension may not support DELETE, so a failure there is
-    logged and the INSERT proceeds. Re-running a partition can therefore leave
-    duplicate rows in Iceberg. DuckLake (which does support DELETE) remains the
-    source of truth.
+    Idempotency: we partition-scope DELETE before the INSERT so a re-run replaces
+    rather than appends. Crucially, if that DELETE fails (e.g. the extension can't
+    delete on this version), we DO NOT insert — appending on top of un-cleared
+    rows would silently duplicate the partition. Skipping leaves Iceberg untouched
+    (a gap that self-heals on the next successful run), which is the safe failure
+    mode since DuckLake remains the source of truth. DuckLake is never affected.
 
     For full persons exports (partition_date is None) the DELETE targets all of
     the team's rows.
+
+    The INSERT rewrites data, so it runs under a more generous statement timeout
+    than the metadata-only DuckLake path (see DUCKGRES_ICEBERG_STATEMENT_TIMEOUT_MS).
 
     Returns True if the INSERT succeeded, False otherwise (never raises — the
     DuckLake backfill must not fail because of an Iceberg write).
@@ -1352,7 +1390,8 @@ def write_partition_to_iceberg(
     _validate_identifier(table)
     _validate_identifier(timestamp_column)
 
-    # Best-effort partition cleanup for idempotent re-runs.
+    # Partition cleanup for idempotent re-runs. If this fails we skip the INSERT
+    # below rather than risk appending duplicates onto un-cleared rows.
     try:
         if partition_date is None:
             with conn.cursor() as cur:
@@ -1368,10 +1407,22 @@ def write_partition_to_iceberg(
                 )
     except Exception as exc:
         context.log.warning(
-            f"Iceberg partition delete skipped for {table} team_id={team_id} "
-            f"(DELETE may be unsupported) — re-run may duplicate rows: {exc}"
+            f"Iceberg partition delete failed for {table} team_id={team_id}; skipping INSERT to avoid "
+            f"duplicating rows (Iceberg left untouched, DuckLake unaffected): {exc}"
         )
+        logger.warning(
+            "duckling_iceberg_delete_failed",
+            table=table,
+            team_id=team_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return False
 
+    # The rewrite can run long for big partitions; give it headroom so it doesn't
+    # silently time out and leave a gap. Best-effort: tolerate duckgres rejecting
+    # a runtime SET, and always try to restore the default afterwards.
+    timeout_raised = _set_statement_timeout(conn, DUCKGRES_ICEBERG_STATEMENT_TIMEOUT_MS)
     try:
         conn.execute(
             psql.SQL("INSERT INTO {}.posthog.{} BY NAME SELECT * FROM read_parquet({})").format(
@@ -1391,6 +1442,9 @@ def write_partition_to_iceberg(
             error_type=type(exc).__name__,
         )
         return False
+    finally:
+        if not timeout_raised:
+            _set_statement_timeout(conn, DUCKGRES_STATEMENT_TIMEOUT_MS)
 
     context.log.info(f"Iceberg dual-write succeeded for {table} team_id={team_id} from {s3_path}")
     logger.info("duckling_iceberg_write_success", table=table, team_id=team_id, s3_path=s3_path)

@@ -9,6 +9,8 @@ import psycopg
 from parameterized import parameterized
 
 from posthog.dags.events_backfill_to_duckling import (
+    DUCKGRES_ICEBERG_STATEMENT_TIMEOUT_MS,
+    DUCKGRES_STATEMENT_TIMEOUT_MS,
     EARLIEST_BACKFILL_DATE,
     EVENTS_COLUMNS,
     EVENTS_TABLE_DDL,
@@ -251,6 +253,50 @@ class TestIcebergDualWrite:
             MagicMock(), conn, "events", "s3://b/f.parquet", 2, "timestamp", datetime(2024, 1, 15)
         )
         assert result is False
+
+    @parameterized.expand([("daily", datetime(2024, 1, 15)), ("full", None)])
+    def test_write_partition_skips_insert_when_delete_fails(self, _name, partition_date):
+        # If partition cleanup fails we must NOT insert — appending onto un-cleared
+        # rows would duplicate the partition. Skipping leaves Iceberg untouched.
+        conn = MagicMock()
+        conn.cursor.return_value.__enter__.return_value.execute.side_effect = Exception("delete unsupported")
+        result = write_partition_to_iceberg(
+            MagicMock(), conn, "events", "s3://b/f.parquet", 2, "timestamp", partition_date
+        )
+        assert result is False
+        # We return before touching the connection for the SET/INSERT.
+        conn.execute.assert_not_called()
+
+    def test_write_partition_raises_and_restores_iceberg_timeout(self):
+        # The rewrite gets a generous timeout, then the default is restored so it
+        # doesn't bleed into later DuckLake calls on the same connection.
+        conn = MagicMock()
+        result = write_partition_to_iceberg(
+            MagicMock(), conn, "events", "s3://b/f.parquet", 2, "timestamp", datetime(2024, 1, 15)
+        )
+        assert result is True
+        set_calls = [c.args[0] for c in conn.execute.call_args_list if isinstance(c.args[0], str)]
+        assert f"SET statement_timeout = {DUCKGRES_ICEBERG_STATEMENT_TIMEOUT_MS}" in set_calls
+        assert f"SET statement_timeout = {DUCKGRES_STATEMENT_TIMEOUT_MS}" in set_calls
+
+    def test_write_partition_tolerates_unsupported_set_timeout(self):
+        # duckgres may reject a runtime SET; the INSERT must still run, and we must
+        # not try to restore a timeout that never applied.
+        conn = MagicMock()
+
+        def execute(sql, *args, **kwargs):
+            if isinstance(sql, str) and sql.startswith("SET statement_timeout"):
+                raise Exception("SET not supported")
+            return MagicMock()
+
+        conn.execute.side_effect = execute
+        result = write_partition_to_iceberg(
+            MagicMock(), conn, "events", "s3://b/f.parquet", 2, "timestamp", datetime(2024, 1, 15)
+        )
+        assert result is True
+        set_calls = [c.args[0] for c in conn.execute.call_args_list if isinstance(c.args[0], str)]
+        # SET attempted once (and raised); never retried to restore the default.
+        assert set_calls == [f"SET statement_timeout = {DUCKGRES_ICEBERG_STATEMENT_TIMEOUT_MS}"]
 
     def test_drop_iceberg_table_rejects_invalid_table(self):
         with pytest.raises(ValueError) as exc_info:
