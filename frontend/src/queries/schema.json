@@ -17560,7 +17560,7 @@
                     "type": "array"
                 },
                 "id": {
-                    "type": ["number", "null"]
+                    "type": "integer"
                 },
                 "name": {
                     "type": "string"
