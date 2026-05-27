@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -103,40 +104,60 @@ class TestSubscriptionActivityLog(BaseTest):
         assert prompt_change["before"] == before
         assert prompt_change["after"] == after
 
-    @parameterized.expand(
-        [
-            ("ai_title_wins", Subscription.ResourceType.AI_PROMPT, None, "My title", "the prompt", "My title"),
-            ("ai_prompt_snippet_when_no_title", Subscription.ResourceType.AI_PROMPT, None, None, "x" * 80, "x" * 60),
-            ("ai_whitespace_prompt_falls_back", Subscription.ResourceType.AI_PROMPT, None, None, "   ", "AI report"),
-            ("ai_empty_falls_back", Subscription.ResourceType.AI_PROMPT, None, None, None, "AI report"),
-            ("insight_uses_insight_name", Subscription.ResourceType.INSIGHT, "insight", None, None, "Signups by week"),
-            ("dashboard_uses_dashboard_name", Subscription.ResourceType.DASHBOARD, "dashboard", None, None, "Growth"),
-        ]
-    )
-    def test_display_name(
-        self,
-        _name: str,
-        resource_type: "Subscription.ResourceType",
-        relation: str | None,
-        title: str | None,
-        prompt: str | None,
-        expected: str,
-    ):
-        relation_factories = {
-            "insight": lambda: {"insight": Insight.objects.create(team=self.team, name="Signups by week")},
-            "dashboard": lambda: {"dashboard": Dashboard.objects.create(team=self.team, name="Growth")},
-        }
-        subscription = Subscription(
-            resource_type=resource_type,
-            title=title,
-            prompt=prompt,
+    def _unsaved_subscription(self, **kwargs) -> Subscription:
+        return Subscription(
             frequency="weekly",
             interval=1,
             start_date=datetime(2022, 1, 1, tzinfo=ZoneInfo("UTC")),
-            **(relation_factories[relation]() if relation else {}),
+            **kwargs,
         )
 
-        assert subscription.display_name == expected
+    @parameterized.expand(
+        [
+            (
+                "ai_title_wins",
+                lambda self: self._unsaved_subscription(
+                    resource_type=Subscription.ResourceType.AI_PROMPT, title="My title", prompt="the prompt"
+                ),
+                "My title",
+            ),
+            (
+                "ai_prompt_snippet_when_no_title",
+                lambda self: self._unsaved_subscription(
+                    resource_type=Subscription.ResourceType.AI_PROMPT, prompt="x" * 80
+                ),
+                "x" * 60,
+            ),
+            (
+                "ai_whitespace_prompt_falls_back",
+                lambda self: self._unsaved_subscription(
+                    resource_type=Subscription.ResourceType.AI_PROMPT, prompt="   "
+                ),
+                "AI report",
+            ),
+            (
+                "ai_empty_falls_back",
+                lambda self: self._unsaved_subscription(resource_type=Subscription.ResourceType.AI_PROMPT),
+                "AI report",
+            ),
+            (
+                "insight_uses_insight_name",
+                lambda self: self._unsaved_subscription(
+                    insight=Insight.objects.create(team=self.team, name="Signups by week")
+                ),
+                "Signups by week",
+            ),
+            (
+                "dashboard_uses_dashboard_name",
+                lambda self: self._unsaved_subscription(
+                    dashboard=Dashboard.objects.create(team=self.team, name="Growth")
+                ),
+                "Growth",
+            ),
+        ]
+    )
+    def test_display_name(self, _name: str, make_subscription: Callable[..., Subscription], expected: str):
+        assert make_subscription(self).display_name == expected
 
     def test_soft_deleting_ai_subscription_records_change(self):
         subscription = self._create_subscription()

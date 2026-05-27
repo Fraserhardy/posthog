@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -56,29 +57,40 @@ class TestSubscription(BaseTest):
         subscription.set_next_delivery_date(datetime(2022, 1, 2, 0, 0, 0).replace(tzinfo=ZoneInfo("UTC")))
         assert subscription.next_delivery_date == datetime(2022, 1, 15, 0, 0).replace(tzinfo=ZoneInfo("UTC"))
 
-    @parameterized.expand(
-        [
-            ("insight_relation", "insight", None, Subscription.ResourceType.INSIGHT),
-            ("dashboard_relation", "dashboard", None, Subscription.ResourceType.DASHBOARD),
-            ("prompt_no_relation", None, "Summarize signups", Subscription.ResourceType.AI_PROMPT),
-        ]
-    )
-    def test_save_derives_resource_type_from_relation(self, _name, relation, prompt, expected):
-        # No resource_type passed — save() must classify it, never leaving the "insight" default on a dashboard/AI sub.
-        relation_factories = {
-            "insight": lambda: {"insight": Insight.objects.create(team=self.team)},
-            "dashboard": lambda: {"dashboard": Dashboard.objects.create(team=self.team)},
-        }
-        subscription = Subscription.objects.create(
+    def _create_subscription(self, **kwargs) -> Subscription:
+        return Subscription.objects.create(
             team=self.team,
             target_type="email",
             target_value="tests@posthog.com",
             frequency="weekly",
             interval=1,
             start_date=datetime(2022, 1, 1, tzinfo=ZoneInfo("UTC")),
-            prompt=prompt,
-            **(relation_factories[relation]() if relation else {}),
+            **kwargs,
         )
+
+    @parameterized.expand(
+        [
+            (
+                "insight_relation",
+                lambda self: self._create_subscription(insight=Insight.objects.create(team=self.team)),
+                Subscription.ResourceType.INSIGHT,
+            ),
+            (
+                "dashboard_relation",
+                lambda self: self._create_subscription(dashboard=Dashboard.objects.create(team=self.team)),
+                Subscription.ResourceType.DASHBOARD,
+            ),
+            (
+                "prompt_no_relation",
+                lambda self: self._create_subscription(prompt="Summarize signups"),
+                Subscription.ResourceType.AI_PROMPT,
+            ),
+        ]
+    )
+    def test_save_derives_resource_type_from_relation(
+        self, _name: str, make_subscription: Callable[..., Subscription], expected: "Subscription.ResourceType"
+    ):
+        subscription = make_subscription(self)
 
         assert subscription.resource_type == expected
         subscription.refresh_from_db()

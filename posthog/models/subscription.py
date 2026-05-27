@@ -164,7 +164,6 @@ class Subscription(ModelActivityMixin, models.Model):
             self._rrule = self.rrule
 
     def save(self, *args, **kwargs) -> None:
-        # Keep resource_type in lockstep with the relation, so no write path leaves it as a stale "insight".
         resolved_resource_type = self._resolve_resource_type()
         if resolved_resource_type != self.resource_type:
             self.resource_type = resolved_resource_type
@@ -180,7 +179,6 @@ class Subscription(ModelActivityMixin, models.Model):
         super().save(*args, **kwargs)
 
     def _resolve_resource_type(self) -> str:
-        # Classify by relation; an AI-prompt subscription has no relation but carries a prompt.
         if self.insight_id:
             return self.ResourceType.INSIGHT
         if self.dashboard_id:
