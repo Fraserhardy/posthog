@@ -1613,6 +1613,16 @@ export const BigQueryDestinationRequestTypeEnumApi = {
     BigQuery: 'BigQuery',
 } as const
 
+/**
+ * * `Postgres` - Postgres
+ */
+export type PostgresDestinationRequestTypeEnumApi =
+    (typeof PostgresDestinationRequestTypeEnumApi)[keyof typeof PostgresDestinationRequestTypeEnumApi]
+
+export const PostgresDestinationRequestTypeEnumApi = {
+    Postgres: 'Postgres',
+} as const
+
 export type BatchExportsListParams = {
     /**
      * Number of results to return per page.
