@@ -4,11 +4,6 @@
 
 {% block section %}
 
-{% comment %}
-rendered_html is markdown rendered by markdown-it-py (html=False) and then sanitized with nh3 to an
-allowlist of tags in ee/tasks/subscriptions/ai_subscription/delivery.py:render_ai_email_html, so raw
-HTML in the report source is already stripped before it reaches this template.
-{% endcomment %}
 {# nosemgrep: python.flask.security.xss.audit.template-unescaped-with-safe.template-unescaped-with-safe #}
 {{ rendered_html|safe }}
 

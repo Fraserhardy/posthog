@@ -1,46 +1,44 @@
 import pytest
 from unittest.mock import MagicMock
 
-from ee.tasks.subscriptions.ai_subscription.delivery import (
+from posthog.temporal.subscriptions.ai_subscription.delivery import (
     SLACK_MRKDWN_SECTION_LIMIT,
     _build_ai_slack_message,
-    _split_into_slack_sections,
+    _split_text_into_chunks,
     render_ai_email_html,
 )
 
+_PARA = "a" * (SLACK_MRKDWN_SECTION_LIMIT - 100)
 
-class TestSplitIntoSlackSections:
-    def test_short_text_is_single_chunk(self) -> None:
-        assert _split_into_slack_sections("short report") == ["short report"]
 
-    def test_empty_text_yields_no_chunks(self) -> None:
-        assert _split_into_slack_sections("") == []
+class TestSplitTextIntoChunks:
+    @pytest.mark.parametrize(
+        "name,text,expected",
+        [
+            ("short_text_single_chunk", "short report", ["short report"]),
+            ("empty_text_no_chunks", "", []),
+            ("breaks_on_paragraph_boundary", f"{_PARA}\n\n{_PARA}", [_PARA, _PARA]),
+        ],
+    )
+    def test_exact_chunking(self, name: str, text: str, expected: list[str]) -> None:
+        assert _split_text_into_chunks(text) == expected
 
     @pytest.mark.parametrize("prefix", ["\n\n", "\n", "  \n\n  "])
     def test_leading_blank_lines_do_not_emit_empty_chunk(self, prefix: str) -> None:
-        # Regression: a body starting on a paragraph boundary used to carve off an empty first chunk,
-        # which Slack rejects as an empty section block.
-        text = prefix + ("a" * (SLACK_MRKDWN_SECTION_LIMIT + 100))
-        chunks = _split_into_slack_sections(text)
-        assert chunks, "expected at least one chunk"
-        assert all(chunk.strip() for chunk in chunks), "no chunk may be empty/whitespace"
+        # regression: a body starting on a paragraph boundary used to carve off an empty first chunk
+        chunks = _split_text_into_chunks(prefix + ("a" * (SLACK_MRKDWN_SECTION_LIMIT + 100)))
+        assert chunks
+        assert all(chunk.strip() for chunk in chunks)
 
     def test_no_newlines_falls_back_to_hard_cut(self) -> None:
         text = "x" * (SLACK_MRKDWN_SECTION_LIMIT * 2 + 50)
-        chunks = _split_into_slack_sections(text)
+        chunks = _split_text_into_chunks(text)
         assert len(chunks) >= 3
         assert all(len(c) <= SLACK_MRKDWN_SECTION_LIMIT for c in chunks)
         assert "".join(chunks) == text
 
-    def test_breaks_on_paragraph_boundary(self) -> None:
-        para = "a" * (SLACK_MRKDWN_SECTION_LIMIT - 100)
-        chunks = _split_into_slack_sections(f"{para}\n\n{para}")
-        assert len(chunks) == 2
-        assert chunks[0] == para
-        assert chunks[1] == para
 
-
-class TestRenderAiEmailHtml:
+class TestRenderAIEmailHtml:
     def test_neutralizes_raw_html_but_keeps_tables(self) -> None:
         html = render_ai_email_html("## Heading\n\n<script>alert(1)</script>\n\n| a | b |\n|---|---|\n| 1 | 2 |")
         # Raw HTML in the markdown source is escaped to inert text (html=False), never a live tag.
@@ -66,12 +64,11 @@ def _mock_subscription() -> MagicMock:
     return sub
 
 
-class TestBuildAiSlackMessage:
+class TestBuildAISlackMessage:
     def test_single_section_report_has_no_thread_messages(self) -> None:
         message = _build_ai_slack_message(_mock_subscription(), "A short report.")
         assert message.channel == "C123"
         assert message.thread_messages == []
-        # title block + body block + divider + actions (no "see thread" block).
         section_texts = [b["text"]["text"] for b in message.blocks if b["type"] == "section"]
         assert all(text.strip() for text in section_texts), "no empty section text allowed"
 

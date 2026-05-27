@@ -277,13 +277,7 @@ async def deliver_slack_message_data(
     subscription: Subscription,
     message_data: SlackMessageData,
 ) -> SlackDeliveryResult:
-    """Send an already-rendered ``SlackMessageData`` (main message + thread messages) over the async
-    client with per-message retry, tracking partial thread failures.
-
-    This is the shared send mechanism: callers inject *what* to send by building the ``SlackMessageData``
-    (insight-asset blocks, AI-report markdown, …); the session, retry, and partial-failure handling are
-    identical regardless of how the body was rendered.
-    """
+    # shared send path: callers build the SlackMessageData; retry + partial-failure handling are shared
     slack_integration = SlackIntegration(integration)
 
     async with aiohttp.ClientSession(trust_env=True) as slack_session:

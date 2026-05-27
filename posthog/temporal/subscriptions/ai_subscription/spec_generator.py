@@ -12,37 +12,25 @@ from posthog.hogql_queries.ai.team_taxonomy_query_runner import TeamTaxonomyQuer
 from posthog.hogql_queries.query_runner import ExecutionMode
 from posthog.models import EventDefinition, PropertyDefinition, Team, User
 from posthog.models.group_type_mapping import get_group_types_for_project
+from posthog.temporal.subscriptions.ai_subscription.prompts import PLAN_GENERATION_PROMPT
+from posthog.temporal.subscriptions.ai_subscription.schemas import EnrichedPromptSpec, QueryPlan
 from posthog.text_sanitization import sanitize_user_text
 
 from ee.hogai.llm import MaxChatOpenAI
-from ee.tasks.subscriptions.ai_subscription.prompts import PLAN_GENERATION_PROMPT
-from ee.tasks.subscriptions.ai_subscription.schemas import EnrichedPromptSpec, QueryPlan
 
 logger = structlog.get_logger(__name__)
 
 
 PROMPT_MAX_LENGTH = 4000
 EVENT_NAMES_SAMPLE_LIMIT = 20
-# Cap on the "events defined but receiving no data" list injected into context. Bounds both the
-# Postgres scan and the context size — a noisy taxonomy can have hundreds of dormant definitions.
+# bounds the Postgres scan + context size for the dormant-events list
 NO_DATA_EVENT_NAMES_LIMIT = 25
 PERSON_PROPERTY_NAMES_LIMIT = 30
 EVENT_NAME_MAX_LENGTH = 120
 
-# MVP default for both the planner and synthesis LLM calls. A single small, cheap model
-# covers both jobs today; split or upgrade if eval results show one stage needs more.
 DEFAULT_PLANNER_MODEL = "gpt-4.1-mini"
 DEFAULT_SYNTHESIS_MODEL = "gpt-4.1-mini"
-# Wall-clock bound on the planner LLM call so a single stuck request can't soak the
-# caller's delivery budget.
 _PLANNER_LLM_TIMEOUT_SECONDS = 90.0
-
-
-# No second-layer regex blocklist: the prompt is summarized back to the same user who
-# wrote it, so injection here is self-targeted. The structural defenses are the
-# `<user_prompt>` framing in the system prompt and `sanitize_user_text` stripping
-# `<system>`-style markers; layering ad-hoc patterns on top just creates false positives
-# for legitimate phrasings like "ignore null values".
 
 
 class PromptRejectedError(ValueError):
@@ -55,9 +43,6 @@ def sanitize_prompt(raw: str | None) -> str:
     if len(raw.strip()) > PROMPT_MAX_LENGTH:
         raise PromptRejectedError(f"Prompt exceeds {PROMPT_MAX_LENGTH} characters.")
 
-    # `sanitize_user_text` (not the newline-preserving core-memory variant): a report request is a
-    # short single-line instruction, so collapsing newlines is fine, and it additionally strips
-    # generic `<...>` tags — closing the HTML-tag gap the core-memory path leaves open.
     cleaned = sanitize_user_text(raw, max_len=PROMPT_MAX_LENGTH)
     if not cleaned:
         raise PromptRejectedError("Prompt is empty.")

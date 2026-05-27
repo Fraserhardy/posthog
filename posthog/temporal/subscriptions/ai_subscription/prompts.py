@@ -81,18 +81,21 @@ fired, so it cannot enumerate zero-data events. The set of events defined in the
 no data in the window is already provided in <project_context> as "Events defined but with no
 data…" — rely on that list; the report synthesis step will use it.
 
-Top AND bottom events in ONE flat query — return the FULL ranked list so the report can read both the
-most-active (head) and least-active (tail) events. A single `ORDER BY … DESC LIMIT 50` only yields the
-top, never the bottom; rely on event-name cardinality being small (use a generous LIMIT, not 50):
-  SELECT
-    event,
-    count() AS event_count,
-    uniq(distinct_id) AS users
-  FROM events
-  WHERE timestamp >= now() - INTERVAL 7 DAY
-  GROUP BY event
-  ORDER BY event_count DESC
-  LIMIT 200
+Top AND bottom events — a single `ORDER BY … DESC LIMIT n` only returns the head, so UNION a DESC head
+with an ASC tail to read both the most- and least-active events regardless of how many events exist:
+  (SELECT event, count() AS event_count, uniq(distinct_id) AS users
+   FROM events
+   WHERE timestamp >= now() - INTERVAL 7 DAY
+   GROUP BY event
+   ORDER BY event_count DESC
+   LIMIT 25)
+  UNION ALL
+  (SELECT event, count() AS event_count, uniq(distinct_id) AS users
+   FROM events
+   WHERE timestamp >= now() - INTERVAL 7 DAY
+   GROUP BY event
+   ORDER BY event_count ASC
+   LIMIT 25)
 
 Joined data available WITHOUT writing a JOIN (the engine joins these automatically on `events`):
 - Person properties: `person.properties.<name>` (e.g. `person.properties.plan`). The property names

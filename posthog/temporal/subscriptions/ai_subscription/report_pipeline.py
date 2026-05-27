@@ -1,13 +1,3 @@
-"""AI-subscription report pipeline: turn a user's prompt into a markdown report.
-
-Three stages run in order — *plan* (an LLM picks up to three HogQL queries), *execute* (run them,
-with a bounded per-step fix-retry), and *synthesize* (an LLM writes the markdown). The pipeline owns
-none of its side effects: persistence and delivery are the caller's job.
-
-This is purpose-built for AI subscriptions, not a general primitive — every input and prompt is
-subscription-shaped. Generalising it is a future exercise, not a present claim.
-"""
-
 import re
 import uuid
 import asyncio
@@ -24,19 +14,19 @@ from posthog.exceptions_capture import capture_exception
 from posthog.models import Team, User
 from posthog.ph_client import ph_scoped_capture
 from posthog.sync import database_sync_to_async
-from posthog.text_sanitization import strip_llm_framing_markers
-
-from ee.hogai.context.insight.query_executor import AssistantQueryExecutor
-from ee.hogai.llm import MaxChatOpenAI
-from ee.hogai.tool_errors import MaxToolRetryableError
-from ee.tasks.subscriptions.ai_subscription.prompts import AI_SUBSCRIPTION_SYNTHESIS_PROMPT, HOGQL_FIX_PROMPT
-from ee.tasks.subscriptions.ai_subscription.schemas import EnrichedPromptSpec, HogQLFix, QueryPlanStep
-from ee.tasks.subscriptions.ai_subscription.spec_generator import (
+from posthog.temporal.subscriptions.ai_subscription.prompts import AI_SUBSCRIPTION_SYNTHESIS_PROMPT, HOGQL_FIX_PROMPT
+from posthog.temporal.subscriptions.ai_subscription.schemas import EnrichedPromptSpec, HogQLFix, QueryPlanStep
+from posthog.temporal.subscriptions.ai_subscription.spec_generator import (
     DEFAULT_PLANNER_MODEL,
     DEFAULT_SYNTHESIS_MODEL,
     PromptRejectedError,
     build_enriched_prompt,
 )
+from posthog.text_sanitization import strip_llm_framing_markers
+
+from ee.hogai.context.insight.query_executor import AssistantQueryExecutor
+from ee.hogai.llm import MaxChatOpenAI
+from ee.hogai.tool_errors import MaxToolRetryableError
 
 logger = structlog.get_logger(__name__)
 
@@ -66,10 +56,7 @@ _RETRYABLE_QUERY_ERRORS: tuple[type[BaseException], ...] = (
 
 
 class AiReportStageError(Exception):
-    """Wraps a transient pipeline failure with the stage that produced it, so the delivery error
-    record distinguishes a planner timeout from a synthesis timeout. ``PromptRejectedError`` is
-    deliberately not wrapped — callers catch it by type to auto-disable / return a 400."""
-
+    # PromptRejectedError is intentionally not wrapped — callers catch it by type.
     def __init__(self, stage: str, original: BaseException) -> None:
         self.stage = stage
         self.original = original
@@ -84,20 +71,13 @@ async def generate_ai_report(
     window_days: int,
     trace_correlation_id: Optional[Union[int, str]] = None,
 ) -> str:
-    """Run plan → execute → synthesize and return the markdown report.
-
-    Async so each caller (a Temporal activity, an API view) owns its own dispatch — no assumption
-    about which thread or event loop we're on. ``PromptRejectedError`` marks a permanent input
-    failure; transient LLM/HogQL failures surface as ``AiReportStageError`` carrying the stage.
-    """
     if user is None:
         raise PromptRejectedError("AI report must have a user to run.")
 
     spec = await _plan(team=team, user=user, prompt=prompt, window_days=window_days, trace_id=trace_correlation_id)
     rendered_results, failed_count = await _execute_plan(spec, team, user, trace_correlation_id)
     report = await _synthesize(spec, rendered_results, team, user, trace_correlation_id)
-    # Emit the coverage signal only once the report actually exists, so the "generated" event isn't
-    # recorded for a run that failed in synthesis.
+    # only after synthesis succeeds, so the event isn't recorded for a failed run
     await _capture_report_quality(spec, failed_count, team, user, trace_correlation_id)
     return report
 
@@ -105,12 +85,6 @@ async def generate_ai_report(
 async def _plan(
     *, team: Team, user: User, prompt: Optional[str], window_days: int, trace_id: Optional[Union[int, str]]
 ) -> EnrichedPromptSpec:
-    """Stage 1 — sanitize the prompt, gather project context, and ask the planner for a query plan.
-
-    ``build_enriched_prompt`` is sync (ORM + ClickHouse + a blocking LLM call), so it runs off the event
-    loop via ``database_sync_to_async`` — which (unlike a bare thread) closes stale Django connections
-    around the call, matching how the rest of the Temporal subscription code dispatches ORM work.
-    """
     try:
         return await database_sync_to_async(build_enriched_prompt, thread_sensitive=False)(
             team=team,
@@ -131,14 +105,10 @@ async def _execute_plan(
     user: User,
     trace_correlation_id: Optional[Union[int, str]],
 ) -> tuple[list[str], int]:
-    """Stage 2 — run every planned HogQL query concurrently, returning rendered blocks and a failure
-    count. A failed step degrades to a placeholder rather than failing the whole report."""
     try:
         return await _run_steps(spec, team, user, trace_correlation_id)
     except Exception as exc:
-        # Per-step failures degrade to placeholders inside `run_step`, so this only catches a failure
-        # in the orchestration itself (e.g. the executor failing to construct) — surface it as a
-        # "query"-stage error rather than a bare exception in the delivery record.
+        # per-step failures degrade to placeholders in run_step; this catches orchestration failure
         raise AiReportStageError("query", exc) from exc
 
 
@@ -149,7 +119,6 @@ async def _synthesize(
     user: User,
     trace_correlation_id: Optional[Union[int, str]],
 ) -> str:
-    """Stage 3 — ask the synthesis LLM to write the markdown report from the prompt + query results."""
     posthog_properties: dict[str, Union[str, int]] = {
         "feature": "ai_subscription",
         "stage": "synthesis",
@@ -164,14 +133,12 @@ async def _synthesize(
         timeout=_SYNTHESIS_LLM_TIMEOUT_SECONDS,
         user=user,
         team=team,
-        # AI report LLM spend is billable — usage counts against the team's AI credits.
         billable=True,
         posthog_properties=posthog_properties,
     )
 
     try:
-        # `database_sync_to_async` (not bare `to_thread`): MaxChatOpenAI reads billing/quota from the
-        # ORM, so we want Django's connection lifecycle around the call.
+        # database_sync_to_async (not to_thread): MaxChatOpenAI reads billing/quota from the ORM
         result = await database_sync_to_async(chat.invoke, thread_sensitive=False)(
             [
                 ("system", AI_SUBSCRIPTION_SYNTHESIS_PROMPT),
@@ -186,9 +153,7 @@ async def _synthesize(
 
 def _compose_synthesis_human_message(spec: EnrichedPromptSpec, rendered_results: list[str]) -> str:
     results_block = "\n".join(rendered_results) if rendered_results else "_No query results were available._"
-    # `overall_intent` is planner LLM output derived from user-controlled context, so it gets the same
-    # framing-marker treatment as the query results and lives inside its own envelope — it must not be
-    # able to inject instruction-shaped text into the synthesis prompt.
+    # planner output from user-controlled context — strip framing markers so it can't inject
     safe_intent = strip_llm_framing_markers(spec.plan.overall_intent, max_len=500)
     return (
         f"<user_prompt>\n{spec.cleaned_prompt}\n</user_prompt>\n\n"
@@ -204,19 +169,14 @@ async def _run_steps(
     user: User,
     trace_correlation_id: Optional[Union[int, str]],
 ) -> tuple[list[str], int]:
-    # Pass `user` so executor-internal permission checks and tracing match other call sites
-    # (see `ee/hogai/context/insight/query_executor.py` callers in master).
     executor = AssistantQueryExecutor(team, datetime.now(tz=UTC), user=user)
 
     async def run_step(step: QueryPlanStep) -> tuple[str, bool]:
         current_hogql = step.hogql
         last_exc: Optional[BaseException] = None
-        # `step.description` is planner LLM output (derived from user-controlled context), so it gets the
-        # same framing-marker stripping as the results it heads — it must not break the <query_results>
-        # envelope from inside its own `###` heading.
+        # planner output — strip framing markers so it can't break the <query_results> envelope
         safe_description = strip_llm_framing_markers(step.description, max_len=500)
 
-        # attempt 0 = original query; subsequent attempts = LLM-fixed rewrites.
         for attempt in range(_MAX_QUERY_FIX_RETRIES + 1):
             try:
                 query = AssistantHogQLQuery(query=current_hogql)
@@ -224,9 +184,7 @@ async def _run_steps(
                     executor.arun_and_format_query(query),
                     timeout=_HOGQL_STEP_TIMEOUT_SECONDS,
                 )
-                # Result VALUES are attacker-influenceable: anyone with a public project token can
-                # ingest events with crafted property values. Strip LLM framing markers so a poisoned
-                # value can't break out of the <query_results> envelope into instruction-shaped text.
+                # result values are attacker-influenceable (public project tokens) — strip framing markers
                 safe_formatted = strip_llm_framing_markers(formatted, _QUERY_RESULT_MAX_CHARS)
                 return (f"### {safe_description}\n\n{safe_formatted}", True)
             except Exception as exc:
@@ -243,8 +201,7 @@ async def _run_steps(
                 )
                 fixed = await _arequest_hogql_fix(
                     original_hogql=current_hogql,
-                    # Only forward the message for errors built for user exposure; an InternalHogQLError
-                    # can echo cluster URLs / internal table names, which must not reach the LLM provider.
+                    # don't forward internal error text to the LLM — it can echo cluster URLs/table names
                     error_message=str(exc) if isinstance(exc, ExposedHogQLError) else type(exc).__name__,
                     step_description=safe_description,
                     team=team,
@@ -252,11 +209,9 @@ async def _run_steps(
                     trace_correlation_id=trace_correlation_id,
                 )
                 if not fixed or fixed.strip() == current_hogql.strip():
-                    # LLM returned nothing useful or the same query — no point looping further.
                     break
                 current_hogql = fixed
 
-        # Exhausted retries (or non-retryable error). Fall through to the placeholder.
         logger.warning(
             "ai_report.query_failed",
             trace_correlation_id=trace_correlation_id,
@@ -265,8 +220,7 @@ async def _run_steps(
         )
         if last_exc is not None:
             capture_exception(last_exc, {"trace_correlation_id": trace_correlation_id, "stage": "query"})
-        # Pass only the type, not the message — ClickHouse errors can echo team-scoped identifiers
-        # (cluster URL, table names) that shouldn't ship into the synthesis prompt (and thus the report).
+        # type only — ClickHouse errors can echo team-scoped identifiers
         type_name = type(last_exc).__name__ if last_exc is not None else "UnknownError"
         return (f"### {safe_description}\n\n_Query failed: {type_name}_", False)
 
@@ -289,7 +243,6 @@ async def _arequest_hogql_fix(
     user: User,
     trace_correlation_id: Optional[Union[int, str]],
 ) -> Optional[str]:
-    """Ask the planner-class LLM to rewrite a failing HogQL query. Returns None on failure."""
     posthog_properties: dict[str, Union[str, int]] = {"feature": "ai_subscription", "stage": "query_fix"}
     if trace_correlation_id is not None:
         posthog_properties["subscription_id"] = trace_correlation_id
@@ -300,14 +253,10 @@ async def _arequest_hogql_fix(
         timeout=_FIX_LLM_TIMEOUT_SECONDS,
         user=user,
         team=team,
-        # Billable, matching the planner/synthesis calls — the whole pipeline's LLM usage is charged
-        # to the team's AI credits.
         billable=True,
         posthog_properties=posthog_properties,
     ).with_structured_output(HogQLFix, method="json_schema", include_raw=False)
 
-    # Single-pass substitution — see spec_generator.generate_query_plan for the rationale behind not
-    # using chained .replace().
     substitutions = {
         "description": step_description,
         "error": error_message,
@@ -343,9 +292,6 @@ async def _capture_report_quality(
     user: User,
     trace_correlation_id: Optional[Union[int, str]],
 ) -> None:
-    """Emit a proactive quality signal per report so we can track query coverage (how many planned
-    steps actually returned data) without waiting for a user to report a bad report. Analytics must
-    never break delivery, so failures here are swallowed."""
     total_steps = len(spec.plan.steps)
     if failed_count:
         logger.warning(
@@ -366,8 +312,6 @@ async def _capture_report_quality(
                     "team_id": team.id,
                     "total_steps": total_steps,
                     "failed_steps": failed_count,
-                    # 1.0 = every planned query returned data; lower means the plan/queries under-served
-                    # the prompt. A drifting coverage rate is the proactive signal to tune the prompts.
                     "query_coverage": (total_steps - failed_count) / total_steps if total_steps else 0.0,
                     "degraded": bool(failed_count),
                 },

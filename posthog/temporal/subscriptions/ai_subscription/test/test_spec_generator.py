@@ -5,9 +5,8 @@ from posthog.test.base import APIBaseTest
 from unittest.mock import patch
 
 from posthog.models import EventDefinition, PropertyDefinition
-
-from ee.tasks.subscriptions.ai_subscription.schemas import QueryPlan, QueryPlanStep
-from ee.tasks.subscriptions.ai_subscription.spec_generator import (
+from posthog.temporal.subscriptions.ai_subscription.schemas import QueryPlan, QueryPlanStep
+from posthog.temporal.subscriptions.ai_subscription.spec_generator import (
     PROMPT_MAX_LENGTH,
     PromptRejectedError,
     _group_type_labels,
@@ -18,7 +17,7 @@ from ee.tasks.subscriptions.ai_subscription.spec_generator import (
     sanitize_prompt,
 )
 
-_SG = "ee.tasks.subscriptions.ai_subscription.spec_generator"
+_SG = "posthog.temporal.subscriptions.ai_subscription.spec_generator"
 
 
 class TestSanitizePrompt:

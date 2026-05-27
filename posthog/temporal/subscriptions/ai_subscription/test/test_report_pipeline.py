@@ -3,16 +3,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from posthog.hogql.errors import ExposedHogQLError
 
-from ee.tasks.subscriptions.ai_subscription.report_pipeline import (
+from posthog.temporal.subscriptions.ai_subscription.report_pipeline import (
     AiReportStageError,
     _arequest_hogql_fix,
     _run_steps,
     generate_ai_report,
 )
-from ee.tasks.subscriptions.ai_subscription.schemas import EnrichedPromptSpec, HogQLFix, QueryPlan, QueryPlanStep
-from ee.tasks.subscriptions.ai_subscription.spec_generator import PromptRejectedError
+from posthog.temporal.subscriptions.ai_subscription.schemas import (
+    EnrichedPromptSpec,
+    HogQLFix,
+    QueryPlan,
+    QueryPlanStep,
+)
+from posthog.temporal.subscriptions.ai_subscription.spec_generator import PromptRejectedError
 
-_RP = "ee.tasks.subscriptions.ai_subscription.report_pipeline"
+_RP = "posthog.temporal.subscriptions.ai_subscription.report_pipeline"
 
 
 def _spec(steps: int = 1) -> EnrichedPromptSpec:
