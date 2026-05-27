@@ -1,7 +1,7 @@
-import { useActions, useValues } from 'kea'
+import { useValues } from 'kea'
 
 import { IconBolt, IconClock, IconSparkles, IconUser, IconWarning } from '@posthog/icons'
-import { LemonButton, LemonSkeleton, LemonTag } from '@posthog/lemon-ui'
+import { LemonSkeleton, LemonTag } from '@posthog/lemon-ui'
 
 import { CopyToClipboardInline } from 'lib/components/CopyToClipboard'
 import { Tooltip } from 'lib/lemon-ui/Tooltip'
@@ -19,9 +19,7 @@ function MetaBadge({ icon, label }: { icon: React.ReactNode; label: React.ReactN
 }
 
 export function MCPSessionDetail(): JSX.Element {
-    const { selectedSession, toolCalls, toolCallsLoading, selectedSessionIntent, isSelectedSessionGenerating } =
-        useValues(mcpSessionsLogic)
-    const { generateIntent } = useActions(mcpSessionsLogic)
+    const { selectedSession, toolCalls, toolCallsLoading } = useValues(mcpSessionsLogic)
 
     if (!selectedSession) {
         return (
@@ -163,29 +161,21 @@ export function MCPSessionDetail(): JSX.Element {
             <hr className="shrink-0 border-t border-primary my-0" />
 
             <footer className="shrink-0 bg-gradient-to-br from-accent/15 via-accent/5 to-surface-primary px-3 py-3">
-                {selectedSessionIntent ? (
-                    <>
-                        <div className="flex items-center gap-2 mb-1.5">
-                            <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent/20 text-accent">
-                                <IconSparkles className="text-xs" />
-                            </div>
-                            <span className="text-[10px] uppercase tracking-wider font-semibold text-accent">
-                                Session intent
-                            </span>
-                        </div>
-                        <p className="text-xs leading-relaxed text-default">{selectedSessionIntent}</p>
-                    </>
-                ) : (
-                    <LemonButton
-                        type="primary"
-                        size="xsmall"
-                        icon={<IconSparkles />}
-                        loading={isSelectedSessionGenerating}
-                        onClick={() => generateIntent(selectedSession.session_id)}
-                    >
-                        {isSelectedSessionGenerating ? 'Thinking…' : "What's the session intent?"}
-                    </LemonButton>
-                )}
+                <div className="flex items-center gap-2 mb-1.5">
+                    <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent/20 text-accent">
+                        <IconSparkles className="text-xs" />
+                    </div>
+                    <span className="text-[10px] uppercase tracking-wider font-semibold text-accent">
+                        Session intent
+                    </span>
+                </div>
+                <p className="text-xs leading-relaxed text-default">
+                    {selectedSession.intent || (
+                        <span className="text-secondary italic">
+                            Summary will appear once the intent workflow runs.
+                        </span>
+                    )}
+                </p>
             </footer>
         </div>
     )

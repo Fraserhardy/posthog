@@ -11,7 +11,7 @@ import { CupedSelection, getCupedSelection, resolveCupedLookbackDays } from './c
 
 export function CupedModal(): JSX.Element {
     const { experiment } = useValues(experimentLogic)
-    const { updateExperimentSettings, setExperiment, restoreUnmodifiedExperiment } = useActions(experimentLogic)
+    const { updateExperiment, setExperiment, restoreUnmodifiedExperiment } = useActions(experimentLogic)
     const { experimentsConfig } = useValues(experimentsConfigLogic)
     const { closeCupedModal } = useActions(modalsLogic)
     const { isCupedModalOpen } = useValues(modalsLogic)
@@ -61,7 +61,7 @@ export function CupedModal(): JSX.Element {
     }
 
     const onSave = (): void => {
-        updateExperimentSettings({ stats_config: experiment.stats_config })
+        updateExperiment({ stats_config: experiment.stats_config })
         closeCupedModal()
     }
 

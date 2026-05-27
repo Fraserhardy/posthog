@@ -21,7 +21,6 @@ import type {
     ChartScales,
     ChartTheme,
     CreateScalesFn,
-    DrawHoverResult,
     PointClickData,
     ResolvedSeries,
     ResolveValueFn,
@@ -56,17 +55,6 @@ const OVERLAY_CANVAS_STYLE: React.CSSProperties = {
     pointerEvents: 'none',
 }
 const DEFAULT_AXIS_COLOR = 'rgba(0, 0, 0, 0.5)'
-const DEFAULT_HOVER_ANIMATION_MS = 150
-
-function resolveHoverAnimationMs(animateHover: boolean | number | undefined): number {
-    if (animateHover === true) {
-        return DEFAULT_HOVER_ANIMATION_MS
-    }
-    if (typeof animateHover === 'number') {
-        return animateHover
-    }
-    return 0
-}
 
 function OverlayLayer({ children }: { children: React.ReactNode }): React.ReactElement {
     return <div style={OVERLAY_STYLE}>{children}</div>
@@ -80,9 +68,8 @@ export interface ChartProps<Meta = unknown> {
     createScales: CreateScalesFn
     /** Static layer — grid, lines, areas, points. Redrawn only when chart inputs change. */
     drawStatic: (args: ChartDrawArgs) => void
-    /** Hover overlay — highlight rings only. Return `false` if nothing was drawn (the
-     *  hover-fade timer pauses while invisible). */
-    drawHover: (args: ChartDrawArgs) => DrawHoverResult
+    /** Hover overlay — highlight rings only. Redrawn on every hoverIndex change. */
+    drawHover: (args: ChartDrawArgs) => void
     tooltip?: (ctx: TooltipContext<Meta>) => React.ReactNode
     onPointClick?: (data: PointClickData<Meta>) => void
     className?: string
@@ -104,11 +91,6 @@ export interface ChartProps<Meta = unknown> {
      *  axis (y in horizontal mode). Should be referentially stable; non-stable identities
      *  invalidate the interaction memo on every render. */
     labelToCoord?: (label: string) => number | undefined
-    /** Override the series fed into value-axis tick sizing (`useChartMargins`). Use when the
-     *  visible series's `data[i]` doesn't span the y-domain — e.g. BoxPlot passes synthetic
-     *  whisker min/max samples so the y-tick column fits the real value range, not just the
-     *  medians it draws on `series.data`. */
-    valueRangeSeries?: Series[]
 }
 
 export function Chart<Meta = unknown>({
@@ -127,7 +109,6 @@ export function Chart<Meta = unknown>({
     resolveValue,
     resolvePositionValue,
     labelToCoord,
-    valueRangeSeries,
 }: ChartProps<Meta>): React.ReactElement {
     const {
         xTickFormatter,
@@ -140,10 +121,7 @@ export function Chart<Meta = unknown>({
         showCrosshair = false,
         axisOrientation = 'vertical',
         isPercent = false,
-        animateHover,
-        margins: marginsOverride,
     } = config ?? {}
-    const hoverAnimationMs = resolveHoverAnimationMs(animateHover)
     const interactionAxis: 'x' | 'y' = axisOrientation === 'horizontal' ? 'y' : 'x'
     const {
         enabled: showTooltip = true,
@@ -161,8 +139,6 @@ export function Chart<Meta = unknown>({
         xTickFormatter,
         yTickFormatter,
         axisOrientation,
-        override: marginsOverride,
-        valueRangeSeries,
     })
 
     const { canvasRef, overlayCanvasRef, wrapperRef, dimensions, ctx, overlayCtx } = useChartCanvas({ margins })
@@ -226,7 +202,6 @@ export function Chart<Meta = unknown>({
         theme,
         drawStatic,
         drawHover: composedDrawHover,
-        hoverAnimationMs,
     })
 
     const wrapperStyle = hoverIndex >= 0 && onPointClick ? WRAPPER_STYLE_POINTER : WRAPPER_STYLE_DEFAULT

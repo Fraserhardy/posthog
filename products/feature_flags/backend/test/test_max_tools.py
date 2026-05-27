@@ -4,6 +4,7 @@ from parameterized import parameterized
 
 from posthog.schema import FeatureFlagGroupType, GroupPropertyFilter, PersonPropertyFilter, PropertyOperator
 
+from posthog.models import FeatureFlag
 from posthog.models.group_type_mapping import GroupTypeMapping
 
 from products.feature_flags.backend.max_tools import (
@@ -11,7 +12,6 @@ from products.feature_flags.backend.max_tools import (
     FeatureFlagCreationSchema,
     MultivariateVariant,
 )
-from products.feature_flags.backend.models.feature_flag import FeatureFlag
 
 from ee.hogai.utils.types import AssistantState
 

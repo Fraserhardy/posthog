@@ -35,7 +35,7 @@ class EarlyAccessFeature(FileSystemSyncMixin, RootTeamMixin, UUIDTModel):
         related_query_name="feature",
     )
     feature_flag = models.ForeignKey(
-        "feature_flags.FeatureFlag",
+        "posthog.FeatureFlag",
         null=True,
         blank=True,
         on_delete=models.PROTECT,

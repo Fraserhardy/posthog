@@ -66,11 +66,8 @@ function buildAppAsync(appName: string): Promise<void> {
 }
 
 async function buildAllAppsParallel(apps: string[]): Promise<void> {
-    // Each Vite build peaks at a few hundred MB, so cap parallelism: the summed
-    // peak of an unbounded run (one process per app) OOM-kills memory-constrained
-    // builders — e.g. the Docker image build, where 27 concurrent Vite processes
-    // saturated the builder. The constraint is memory, not which environment we run in.
-    const concurrency = Math.min(apps.length, 4)
+    // CI environments have limited memory — limit concurrency to avoid OOM kills
+    const concurrency = process.env.CI ? 4 : apps.length
 
     if (concurrency < apps.length) {
         console.info(`\n📦 Building ${apps.length} apps (concurrency: ${concurrency})...`)

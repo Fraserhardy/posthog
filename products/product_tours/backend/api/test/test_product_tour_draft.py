@@ -6,7 +6,8 @@ from django.utils import timezone
 from parameterized import parameterized
 from rest_framework import status
 
-from products.feature_flags.backend.models.feature_flag import FeatureFlag
+from posthog.models.feature_flag import FeatureFlag
+
 from products.product_tours.backend.models import ProductTour
 
 

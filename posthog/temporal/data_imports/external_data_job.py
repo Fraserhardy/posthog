@@ -378,10 +378,8 @@ class ExternalDataJobWorkflow(PostHogWorkflow):
             if skip_post_import_activities:
                 workflow.logger.info(
                     "Skipping post-import activities for externally managed schema",
-                    extra={
-                        "schema_id": str(inputs.external_data_schema_id),
-                        "source_id": str(inputs.external_data_source_id),
-                    },
+                    schema_id=str(inputs.external_data_schema_id),
+                    source_id=str(inputs.external_data_source_id),
                 )
                 return
 
@@ -441,7 +439,7 @@ class ExternalDataJobWorkflow(PostHogWorkflow):
             except WorkflowAlreadyStartedError:
                 workflow.logger.warning(
                     "DuckLake copy already running, skipping",
-                    extra={"schema_id": str(inputs.external_data_schema_id)},
+                    schema_id=str(inputs.external_data_schema_id),
                 )
 
         except exceptions.ActivityError as e:

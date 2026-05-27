@@ -21,12 +21,10 @@ import type {
     CreateFileDownloadRequestApi,
     CreateOutputApi,
     FileDownloadBatchExportOnDemandApi,
-    FileDownloadBatchExportsListParams,
     FileDownloadBatchExportsLogsRetrieveParams,
     PaginatedBatchExportBackfillListApi,
     PaginatedBatchExportListApi,
     PaginatedBatchExportRunListApi,
-    PaginatedListOutputListApi,
     PatchedBatchExportRequestApi,
     RetrieveFileDownloadResponseApi,
 } from './api.schemas'
@@ -507,33 +505,6 @@ export const batchExportsTestRetrieve = async (projectId: string, options?: Requ
     })
 }
 
-export const getFileDownloadBatchExportsListUrl = (projectId: string, params?: FileDownloadBatchExportsListParams) => {
-    const normalizedParams = new URLSearchParams()
-
-    Object.entries(params || {}).forEach(([key, value]) => {
-        if (value !== undefined) {
-            normalizedParams.append(key, value === null ? 'null' : value.toString())
-        }
-    })
-
-    const stringifiedParams = normalizedParams.toString()
-
-    return stringifiedParams.length > 0
-        ? `/api/projects/${projectId}/file_download_batch_exports/?${stringifiedParams}`
-        : `/api/projects/${projectId}/file_download_batch_exports/`
-}
-
-export const fileDownloadBatchExportsList = async (
-    projectId: string,
-    params?: FileDownloadBatchExportsListParams,
-    options?: RequestInit
-): Promise<PaginatedListOutputListApi> => {
-    return apiMutator<PaginatedListOutputListApi>(getFileDownloadBatchExportsListUrl(projectId, params), {
-        ...options,
-        method: 'GET',
-    })
-}
-
 export const getFileDownloadBatchExportsCreateUrl = (projectId: string) => {
     return `/api/projects/${projectId}/file_download_batch_exports/`
 }
@@ -559,7 +530,7 @@ export const getFileDownloadBatchExportsRetrieveUrl = (projectId: string, id: st
 }
 
 /**
- * Get a batch export on demand run.
+ * Get a run of a batch export on demand.
 
 If the underlying batch export run has completed, we return keys to the
 generated file downloads so that users may download them by making a request

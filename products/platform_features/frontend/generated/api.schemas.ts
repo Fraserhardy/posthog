@@ -922,7 +922,6 @@ export type ActivityLogListParams = {
 * `LogsExclusionRule` - LogsExclusionRule
 * `ProductTour` - ProductTour
 * `Ticket` - Ticket
-* `InstanceSetting` - InstanceSetting
  * @minLength 1
  */
     scope?: ActivityLogListScope
@@ -998,7 +997,6 @@ export const ActivityLogListScope = {
     LogsExclusionRule: 'LogsExclusionRule',
     ProductTour: 'ProductTour',
     Ticket: 'Ticket',
-    InstanceSetting: 'InstanceSetting',
 } as const
 
 /**
@@ -1061,7 +1059,6 @@ export const ActivityLogListScope = {
  * `LogsExclusionRule` - LogsExclusionRule
  * `ProductTour` - ProductTour
  * `Ticket` - Ticket
- * `InstanceSetting` - InstanceSetting
  */
 export type ActivityLogListScopesItem = (typeof ActivityLogListScopesItem)[keyof typeof ActivityLogListScopesItem]
 
@@ -1125,7 +1122,6 @@ export const ActivityLogListScopesItem = {
     LogsExclusionRule: 'LogsExclusionRule',
     ProductTour: 'ProductTour',
     Ticket: 'Ticket',
-    InstanceSetting: 'InstanceSetting',
 } as const
 
 export type AdvancedActivityLogsListParams = {

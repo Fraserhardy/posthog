@@ -1525,7 +1525,7 @@ class TestUserAPI(APIBaseTest):
         """Test that prepare_toolbar_preloaded_flags creates a cache entry with feature flags"""
         from django.core.cache import cache
 
-        from products.feature_flags.backend.models.feature_flag import FeatureFlag
+        from posthog.models import FeatureFlag
 
         patched_token.return_value = "test-cache-key-123"
 

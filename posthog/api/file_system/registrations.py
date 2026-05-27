@@ -357,7 +357,7 @@ def register_core_file_system_types() -> None:
 
     register_file_system_type(
         "feature_flag",
-        "feature_flags",
+        "posthog",
         "FeatureFlag",
         undo_message="Send PATCH /api/projects/@current/feature_flags/{id} with deleted=false.",
     )
@@ -377,7 +377,7 @@ def register_core_file_system_types() -> None:
 
     register_file_system_type(
         "insight",
-        "product_analytics",
+        "posthog",
         "Insight",
         lookup_field="short_id",
         undo_message="Send PATCH /api/projects/@current/insights/{id} with deleted=false.",

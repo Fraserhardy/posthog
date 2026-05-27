@@ -5,9 +5,7 @@ from typing import cast
 
 from django.core.management.base import BaseCommand
 
-from posthog.models import Team, User
-
-from products.feature_flags.backend.models.feature_flag import FeatureFlag
+from posthog.models import FeatureFlag, Team, User
 
 # These flags won't be enabled when syncing feature flags
 # Turn these on for flags that heavily change the behavior and that you wouldn't like

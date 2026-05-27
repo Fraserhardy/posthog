@@ -82,7 +82,6 @@ export const HogFunctionsCreateBody = /* @__PURE__ */ zod.object({
                 key: zod.string(),
                 label: zod.string().optional(),
                 choices: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-                searchable: zod.boolean().optional(),
                 required: zod.boolean().default(hogFunctionsCreateBodyInputsSchemaItemRequiredDefault),
                 default: zod.unknown().optional(),
                 secret: zod.boolean().default(hogFunctionsCreateBodyInputsSchemaItemSecretDefault),
@@ -178,7 +177,6 @@ export const HogFunctionsCreateBody = /* @__PURE__ */ zod.object({
                             key: zod.string(),
                             label: zod.string().optional(),
                             choices: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-                            searchable: zod.boolean().optional(),
                             required: zod
                                 .boolean()
                                 .default(hogFunctionsCreateBodyMappingsItemInputsSchemaItemRequiredDefault),
@@ -324,7 +322,6 @@ export const HogFunctionsUpdateBody = /* @__PURE__ */ zod.object({
                 key: zod.string(),
                 label: zod.string().optional(),
                 choices: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-                searchable: zod.boolean().optional(),
                 required: zod.boolean().default(hogFunctionsUpdateBodyInputsSchemaItemRequiredDefault),
                 default: zod.unknown().optional(),
                 secret: zod.boolean().default(hogFunctionsUpdateBodyInputsSchemaItemSecretDefault),
@@ -420,7 +417,6 @@ export const HogFunctionsUpdateBody = /* @__PURE__ */ zod.object({
                             key: zod.string(),
                             label: zod.string().optional(),
                             choices: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-                            searchable: zod.boolean().optional(),
                             required: zod
                                 .boolean()
                                 .default(hogFunctionsUpdateBodyMappingsItemInputsSchemaItemRequiredDefault),
@@ -566,7 +562,6 @@ export const HogFunctionsPartialUpdateBody = /* @__PURE__ */ zod.object({
                 key: zod.string(),
                 label: zod.string().optional(),
                 choices: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-                searchable: zod.boolean().optional(),
                 required: zod.boolean().default(hogFunctionsPartialUpdateBodyInputsSchemaItemRequiredDefault),
                 default: zod.unknown().optional(),
                 secret: zod.boolean().default(hogFunctionsPartialUpdateBodyInputsSchemaItemSecretDefault),
@@ -662,7 +657,6 @@ export const HogFunctionsPartialUpdateBody = /* @__PURE__ */ zod.object({
                             key: zod.string(),
                             label: zod.string().optional(),
                             choices: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-                            searchable: zod.boolean().optional(),
                             required: zod
                                 .boolean()
                                 .default(hogFunctionsPartialUpdateBodyMappingsItemInputsSchemaItemRequiredDefault),
@@ -812,7 +806,6 @@ export const HogFunctionsEnableBackfillsCreateBody = /* @__PURE__ */ zod.object(
                 key: zod.string(),
                 label: zod.string().optional(),
                 choices: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-                searchable: zod.boolean().optional(),
                 required: zod.boolean().default(hogFunctionsEnableBackfillsCreateBodyInputsSchemaItemRequiredDefault),
                 default: zod.unknown().optional(),
                 secret: zod.boolean().default(hogFunctionsEnableBackfillsCreateBodyInputsSchemaItemSecretDefault),
@@ -908,7 +901,6 @@ export const HogFunctionsEnableBackfillsCreateBody = /* @__PURE__ */ zod.object(
                             key: zod.string(),
                             label: zod.string().optional(),
                             choices: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-                            searchable: zod.boolean().optional(),
                             required: zod
                                 .boolean()
                                 .default(
@@ -1128,7 +1120,6 @@ export const HogFunctionsInvocationsCreateBody = /* @__PURE__ */ zod.object({
                         key: zod.string(),
                         label: zod.string().optional(),
                         choices: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-                        searchable: zod.boolean().optional(),
                         required: zod
                             .boolean()
                             .default(hogFunctionsInvocationsCreateBodyConfigurationOneInputsSchemaItemRequiredDefault),
@@ -1233,7 +1224,6 @@ export const HogFunctionsInvocationsCreateBody = /* @__PURE__ */ zod.object({
                                     key: zod.string(),
                                     label: zod.string().optional(),
                                     choices: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-                                    searchable: zod.boolean().optional(),
                                     required: zod
                                         .boolean()
                                         .default(

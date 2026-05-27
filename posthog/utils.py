@@ -75,11 +75,10 @@ TEMPLATE_CONTEXT_DURATION_HISTOGRAM = Histogram(
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 
-    from posthog.models import Team, User
+    from posthog.models import InsightVariable, Team, User
 
     from products.dashboards.backend.models.dashboard import Dashboard
     from products.dashboards.backend.models.dashboard_tile import DashboardTile
-    from products.product_analytics.backend.models.insight_variable import InsightVariable
 
 DATERANGE_MAP = {
     "second": datetime.timedelta(seconds=1),
@@ -1442,9 +1441,8 @@ def filters_override_requested_by_client(request: Request, dashboard: Optional["
 def variables_override_requested_by_client(
     request: Optional[Request], dashboard: Optional["Dashboard"], variables: list["InsightVariable"]
 ) -> Optional[dict[str, dict]]:
+    from posthog.api.insight_variable import map_stale_to_latest
     from posthog.auth import SharingAccessTokenAuthentication, SharingPasswordProtectedAuthentication
-
-    from products.product_analytics.backend.api.insight_variable import map_stale_to_latest
 
     dashboard_variables = (dashboard and dashboard.variables) or {}
     raw_override = request.query_params.get("variables_override") if request else None

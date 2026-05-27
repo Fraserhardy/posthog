@@ -2,7 +2,7 @@ import json
 
 from posthog.test.base import BaseTest
 
-from products.feature_flags.backend.models.scheduled_change import ScheduledChange
+from posthog.models import ScheduledChange
 
 
 class TestScheduledChange(BaseTest):

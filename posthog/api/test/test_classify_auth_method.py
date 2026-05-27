@@ -2,6 +2,7 @@ from django.test import TestCase
 
 from parameterized import parameterized
 
+from posthog.api.feature_flag import _classify_auth_method
 from posthog.auth import (
     JwtAuthentication,
     OAuthAccessTokenAuthentication,
@@ -9,8 +10,6 @@ from posthog.auth import (
     ProjectSecretAPIKeyAuthentication,
     SessionAuthentication,
 )
-
-from products.feature_flags.backend.api.feature_flag import _classify_auth_method
 
 
 class TestClassifyAuthMethod(TestCase):

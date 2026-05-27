@@ -69,23 +69,6 @@ export interface SearchResponse {
 
 export type Result<T, E = Error> = { success: true; data: T } | { success: false; error: E }
 
-export interface DataWarehouseSyncWarning {
-    table_name: string
-    schema_name: string
-    source_type: string
-    status: string
-    message: string
-}
-
-export interface QueryEndpointResponse {
-    results: unknown
-    columns?: unknown
-    formatted_results?: string
-    // null (not just absent) when the query response carries no warnings — the backend
-    // serializes the field explicitly rather than omitting it.
-    warnings?: DataWarehouseSyncWarning[] | null
-}
-
 export interface ApiConfig {
     apiToken: string
     baseUrl: string
@@ -999,10 +982,14 @@ export class ApiClient {
                 }
             },
 
-            query: async ({ query }: { query: Record<string, any> }): Promise<Result<QueryEndpointResponse>> => {
+            query: async ({
+                query,
+            }: {
+                query: Record<string, any>
+            }): Promise<Result<{ results: unknown; columns?: unknown; formatted_results?: string }>> => {
                 const url = `${this.baseUrl}/api/environments/${projectId}/query/`
 
-                return this.fetchJson<QueryEndpointResponse>(url, {
+                return this.fetchJson<{ results: unknown; columns?: unknown; formatted_results?: string }>(url, {
                     method: 'POST',
                     body: JSON.stringify({ query }),
                 })

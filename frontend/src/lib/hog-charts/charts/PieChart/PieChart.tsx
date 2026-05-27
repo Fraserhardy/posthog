@@ -146,25 +146,25 @@ function PieChartInner<Meta = unknown>({
     }, [])
 
     const drawHover = useCallback(
-        (args: ChartDrawArgs): boolean => {
+        (args: ChartDrawArgs) => {
             const layout = getLayoutFromArgs<Meta>(args)
             if (!layout || args.hoverIndex < 0) {
-                return false
+                return
             }
             // Single-slice charts have nothing to pop out — drawing the offset would visually
             // shift the whole wheel.
             if (layout.slices.length <= 1 || effectiveHoverOffset === 0) {
-                return false
+                return
             }
             // The mask step below relies on `theme.backgroundColor` to erase the static-canvas
             // copy of the slice. Without one, the popped-out slice would partially overlap the
             // original and smear — better to skip the pop-out than render that.
             if (!args.theme.backgroundColor) {
-                return false
+                return
             }
             const slice = layout.slices[args.hoverIndex]
             if (!slice) {
-                return false
+                return
             }
             // Two-pass paint on the (always-cleared) overlay canvas:
             //   1. Fill the slice's original footprint with the theme background. The overlay
@@ -183,7 +183,6 @@ function PieChartInner<Meta = unknown>({
                 fillStyle: slice.color,
                 withStroke: layout.slices.length > 1 ? args.theme.backgroundColor : undefined,
             })
-            return true
         },
         [effectiveHoverOffset]
     )

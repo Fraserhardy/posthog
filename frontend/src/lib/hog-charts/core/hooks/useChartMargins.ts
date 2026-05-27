@@ -27,13 +27,6 @@ interface UseChartMarginsOptions {
     xTickFormatter?: (value: string, index: number) => string | null
     yTickFormatter?: (value: number) => string
     axisOrientation?: 'vertical' | 'horizontal'
-    /** Per-side overrides applied on top of the computed margins. */
-    override?: Partial<ChartMargins>
-    /** Override the value-range source for value-axis tick sizing. Defaults to `series`. Use
-     *  this when the visible series's `data[i]` doesn't span the full y-domain — e.g. BoxPlot
-     *  passes the whisker min/max samples so the y-tick column fits the actual range, not just
-     *  the medians it draws on `series.data`. yAxis-id discovery still reads from `series`. */
-    valueRangeSeries?: Series[]
 }
 
 function widestCategoryLabelWidth(
@@ -80,11 +73,8 @@ export function useChartMargins({
     xTickFormatter,
     yTickFormatter,
     axisOrientation = 'vertical',
-    override,
-    valueRangeSeries,
 }: UseChartMarginsOptions): ChartMargins {
     const isHorizontal = axisOrientation === 'horizontal'
-    const valueSeries = valueRangeSeries ?? series
     const normalizedXAxisLabel = normalizeAxisLabel(xAxisLabel)
     const normalizedYAxisLabel = normalizeAxisLabel(yAxisLabel)
 
@@ -102,22 +92,22 @@ export function useChartMargins({
         if (isHorizontal) {
             return widestCategoryLabelWidth(labels, xTickFormatter)
         }
-        return widestValueLabelWidth(valueSeries, yTickFormatter)
-    }, [valueSeries, yTickFormatter, hideYAxis, isHorizontal, labels, xTickFormatter])
+        return widestValueLabelWidth(series, yTickFormatter)
+    }, [series, yTickFormatter, hideYAxis, isHorizontal, labels, xTickFormatter])
 
     const xLabelHalfWidth = useMemo<number>(() => {
         if (hideXAxis) {
             return 0
         }
         if (isHorizontal) {
-            const widest = widestValueLabelWidth(valueSeries, yTickFormatter)
+            const widest = widestValueLabelWidth(series, yTickFormatter)
             return Math.ceil(widest / 2)
         }
         if (labels.length === 0) {
             return 0
         }
         return Math.ceil(widestCategoryLabelWidth(labels, xTickFormatter) / 2)
-    }, [labels, xTickFormatter, hideXAxis, isHorizontal, valueSeries, yTickFormatter])
+    }, [labels, xTickFormatter, hideXAxis, isHorizontal, series, yTickFormatter])
 
     return useMemo<ChartMargins>(() => {
         const bottom = hideXAxis
@@ -132,8 +122,7 @@ export function useChartMargins({
               ) + (normalizedYAxisLabel ? Y_AXIS_TITLE_MARGIN : 0)
         const rightFloor = hasMultipleAxes && !hideYAxis ? MIN_RIGHT_MARGIN_DUAL_AXIS : DEFAULT_MARGINS.right
         const right = Math.max(rightFloor, xLabelHalfWidth + X_LABEL_EDGE_PADDING)
-        const computed: ChartMargins = { top: DEFAULT_MARGINS.top, right, bottom, left }
-        return override ? { ...computed, ...override } : computed
+        return { top: DEFAULT_MARGINS.top, right, bottom, left }
     }, [
         hideXAxis,
         hideYAxis,
@@ -142,6 +131,5 @@ export function useChartMargins({
         xLabelHalfWidth,
         normalizedXAxisLabel,
         normalizedYAxisLabel,
-        override,
     ])
 }

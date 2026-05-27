@@ -15,9 +15,7 @@ from dateutil.relativedelta import relativedelta
 from prometheus_client import Counter
 
 from posthog.exceptions_capture import capture_exception
-
-from products.feature_flags.backend.models.feature_flag import FeatureFlag
-from products.feature_flags.backend.models.scheduled_change import ScheduledChange
+from posthog.models import FeatureFlag, ScheduledChange
 
 logger = structlog.get_logger(__name__)
 

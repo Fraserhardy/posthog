@@ -16,7 +16,6 @@ import type {
     ChartMargins,
     ChartScales,
     ChartTheme,
-    DrawHoverResult,
     ResolvedSeries,
     Series,
     TooltipContext,
@@ -66,7 +65,7 @@ export interface RadialChartProps<Meta = unknown> {
     theme: ChartTheme
     buildLayout: RadialLayoutBuilder<Meta>
     drawStatic: (args: ChartDrawArgs) => void
-    drawHover: (args: ChartDrawArgs) => DrawHoverResult
+    drawHover: (args: ChartDrawArgs) => void
     tooltip?: (ctx: TooltipContext<Meta>) => React.ReactNode
     showTooltip?: boolean
     onSliceClick?: (payload: RadialSlicePayload<Meta>) => void

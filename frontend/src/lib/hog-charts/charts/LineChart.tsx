@@ -70,23 +70,17 @@ function LineChartInner<Meta = unknown>({
 }: LineChartProps<Meta>): React.ReactElement {
     const { yScaleType = 'linear', percentStackView = false, showGrid = false } = config ?? {}
 
-    const hasMultipleFilledSeries = useMemo(() => {
-        const filledSeries = series.filter((s) => s.fill && !s.fill.lowerData)
-        return filledSeries.length >= 2
-    }, [series])
+    const hasAreaFill = useMemo(() => series.some((s) => s.fill !== undefined && !s.fill.lowerData), [series])
 
     const stackedData = useMemo((): Map<string, StackedBand> | undefined => {
         if (percentStackView) {
             return computePercentStackData(series, labels)
         }
-        // Only stack when there are 2+ fillable series — a single area series has nothing to stack
-        // against, and forcing a stacked band would feed a `bottomValues` array into the canvas
-        // renderer, which disables the gradient fill path.
-        if (hasMultipleFilledSeries) {
+        if (hasAreaFill) {
             return computeStackData(series, labels)
         }
         return undefined
-    }, [percentStackView, hasMultipleFilledSeries, series, labels])
+    }, [percentStackView, hasAreaFill, series, labels])
 
     const chartConfig = useMemo(() => {
         const base = { ...config, isPercent: percentStackView }
@@ -210,11 +204,10 @@ function LineChartInner<Meta = unknown>({
     )
 
     const drawHover = useCallback(
-        ({ ctx, scales, series: coloredSeries, labels: drawLabels, hoverIndex, theme }: ChartDrawArgs): boolean => {
+        ({ ctx, scales, series: coloredSeries, labels: drawLabels, hoverIndex, theme }: ChartDrawArgs) => {
             if (hoverIndex < 0) {
-                return false
+                return
             }
-            let drewAny = false
             for (const s of coloredSeries) {
                 if (s.visibility?.excluded || s.fill?.lowerData) {
                     continue
@@ -230,10 +223,8 @@ function LineChartInner<Meta = unknown>({
                 const y = resolveYScaleForSeries(scales, s)(data[hoverIndex])
                 if (x != null && isFinite(y)) {
                     drawHighlightPoint(ctx, x, y, s.color, theme.backgroundColor ?? '#ffffff')
-                    drewAny = true
                 }
             }
-            return drewAny
         },
         [stackedData]
     )

@@ -1,13 +1,13 @@
 import { useActions, useValues } from 'kea'
 
-import { IconRefresh, IconRewindPlay } from '@posthog/icons'
+import { IconRefresh } from '@posthog/icons'
 import { LemonButton, LemonTable, LemonTag, Link, Tooltip } from '@posthog/lemon-ui'
 
 import { TZLabel } from 'lib/components/TZLabel'
 import { LemonTableColumns } from 'lib/lemon-ui/LemonTable'
 import { urls } from 'scenes/urls'
 
-import { ObservationResultSummary, ObservationStatusTag } from '../../components/ObservationCard'
+import { ObservationCard, ObservationResultSummary, ObservationStatusTag } from '../../components/ObservationCard'
 import type { ReplayObservationApi } from '../../generated/api.schemas'
 import { replayScannerLogic } from '../replayScannerLogic'
 
@@ -42,10 +42,7 @@ export function ScannerObservationsTable({ scannerId, tabId }: { scannerId: stri
             key: 'session',
             width: 300,
             render: (_, obs) => (
-                <Link
-                    to={urls.replayVisionObservation(obs.id)}
-                    className="font-mono text-xs text-primary truncate block"
-                >
+                <Link to={urls.replaySingle(obs.session_id)} className="font-mono text-xs text-primary truncate block">
                     {obs.session_id}
                 </Link>
             ),
@@ -58,11 +55,7 @@ export function ScannerObservationsTable({ scannerId, tabId }: { scannerId: stri
         {
             title: 'Result',
             key: 'result',
-            render: (_, obs) => (
-                <div className="min-w-[18rem] max-w-xl">
-                    <ObservationResultSummary observation={obs} />
-                </div>
-            ),
+            render: (_, obs) => <ObservationResultSummary observation={obs} />,
         },
         {
             title: 'Triggered by',
@@ -74,31 +67,22 @@ export function ScannerObservationsTable({ scannerId, tabId }: { scannerId: stri
             ),
         },
         {
+            title: 'Model',
+            key: 'model',
+            render: (_, obs) => (
+                <span className="font-mono text-xs text-muted">{obs.scanner_snapshot?.model || '—'}</span>
+            ),
+        },
+        {
             title: 'Created',
             key: 'created_at',
             render: (_, obs) => <TZLabel time={obs.created_at} />,
             sorter: (a, b) => a.created_at.localeCompare(b.created_at),
         },
-        {
-            title: '',
-            key: 'actions',
-            width: 1,
-            render: (_, obs) => (
-                <LemonButton
-                    size="small"
-                    type="secondary"
-                    icon={<IconRewindPlay />}
-                    to={urls.replaySingle(obs.session_id)}
-                    className="whitespace-nowrap"
-                >
-                    View recording
-                </LemonButton>
-            ),
-        },
     ]
 
     return (
-        <div className="space-y-4">
+        <div className="space-y-4 max-w-6xl">
             <div className="flex items-start justify-between gap-4">
                 <p className="text-muted text-sm m-0">
                     Past applications of this scanner to session recordings. Each row is one observation.
@@ -162,6 +146,15 @@ export function ScannerObservationsTable({ scannerId, tabId }: { scannerId: stri
                 rowKey="id"
                 pagination={{ pageSize: 50 }}
                 nouns={['observation', 'observations']}
+                expandable={{
+                    rowExpandable: (obs) =>
+                        obs.status === 'succeeded' || obs.status === 'failed' || obs.status === 'ineligible',
+                    expandedRowRender: (obs) => (
+                        <div className="p-2">
+                            <ObservationCard observation={obs} />
+                        </div>
+                    ),
+                }}
                 emptyState={
                     <div className="p-6 text-center text-muted">
                         No observations yet. Observations appear here once the scanner runs on a schedule, or when you

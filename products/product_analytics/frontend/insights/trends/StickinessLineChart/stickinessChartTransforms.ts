@@ -2,8 +2,6 @@ import { DEFAULT_Y_AXIS_ID } from 'lib/hog-charts'
 import type { Series, TimeSeriesLineChartConfig, TooltipConfig, YAxisConfig } from 'lib/hog-charts'
 import type { SeriesDatum } from 'scenes/insights/InsightTooltip/insightTooltipUtils'
 
-import { ChartDisplayType } from '~/types'
-
 // Shape both IndexedTrendResult (kea) and StickinessResultItem (MCP) satisfy.
 export interface StickinessResultLike {
     id?: string | number
@@ -23,7 +21,6 @@ export type StickinessYAxisScaleType = string | null | undefined
 
 export interface BuildStickinessSeriesOpts<R extends StickinessResultLike, M = unknown> {
     showMultipleYAxes?: boolean
-    display?: ChartDisplayType | null
     getColor: (r: R, index: number) => string
     getHidden?: (r: R, index: number) => boolean
     buildMeta?: (r: R, index: number) => M
@@ -53,7 +50,6 @@ export function buildStickinessMainSeries<R extends StickinessResultLike, M = un
         color: opts.getColor(r, index),
         yAxisId,
         meta,
-        fill: opts.display === ChartDisplayType.ActionsAreaGraph ? {} : undefined,
         visibility: excluded ? { excluded: true } : undefined,
     }
 }

@@ -4,8 +4,7 @@ from django.urls import reverse
 from django.utils.html import format_html
 
 from posthog.admin.filters import DeletedFilter
-
-from products.product_analytics.backend.models.insight import Insight
+from posthog.models import Insight
 
 
 class InsightAdminForm(forms.ModelForm):

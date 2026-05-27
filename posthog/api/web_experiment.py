@@ -11,6 +11,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.request import Request
 
+from posthog.api.feature_flag import FeatureFlagSerializer
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.api.utils import get_token
 from posthog.event_usage import report_user_action
@@ -20,7 +21,6 @@ from posthog.utils_cors import cors_response
 
 from products.experiments.backend.models.experiment import Experiment
 from products.experiments.backend.models.web_experiment import WebExperiment
-from products.feature_flags.backend.api.feature_flag import FeatureFlagSerializer
 
 
 def validate_no_xss(content: str, field_name: str) -> None:

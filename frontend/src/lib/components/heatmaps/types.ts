@@ -2,7 +2,6 @@ export type CommonFilters = {
     date_from?: string | null
     date_to?: string | null
     filter_test_accounts?: boolean
-    cohort_ids?: number[]
 }
 
 export type HeatmapKind = 'click' | 'rageclick' | 'mousemove' | 'scrolldepth'

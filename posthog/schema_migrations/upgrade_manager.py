@@ -6,7 +6,7 @@ from posthog.hogql_queries.legacy_compatibility.flagged_conversion_manager impor
 from posthog.schema_migrations.upgrade import upgrade
 
 if TYPE_CHECKING:
-    from products.product_analytics.backend.models.insight import Insight
+    from posthog.models.insight import Insight
 
 
 @contextmanager

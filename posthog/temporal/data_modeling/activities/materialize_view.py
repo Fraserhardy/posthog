@@ -34,7 +34,6 @@ from posthog.temporal.common.logger import get_logger
 from products.data_modeling.backend.models import Node, NodeType
 from products.data_modeling.backend.models.data_modeling_job import DataModelingJob
 from products.data_modeling.backend.models.datawarehouse_saved_query import DataWarehouseSavedQuery
-from products.data_modeling.backend.models.modeling import bounded_resolver_factory_for_view
 from products.data_warehouse.backend.s3 import ensure_bucket_exists, get_s3_client
 from products.endpoints.backend.services.endpoint_materialization_service import prepare_executable_query
 
@@ -234,9 +233,7 @@ def _transform_unsupported_decimals(batch: pa.RecordBatch) -> pa.RecordBatch:
     return pa.RecordBatch.from_arrays(new_columns, schema=pa.schema(new_fields, metadata=new_metadata))
 
 
-async def get_query_row_count(
-    query: str, team: Team, logger: FilteringBoundLogger, view_name: str | None = None
-) -> int:
+async def get_query_row_count(query: str, team: Team, logger: FilteringBoundLogger) -> int:
     """Get the total row count for a HogQL query."""
     count_query = f"SELECT count() FROM ({query})"
 
@@ -254,12 +251,7 @@ async def get_query_row_count(
     context.database = await database_sync_to_async(Database.create_for)(team=team, modifiers=context.modifiers)
 
     prepared_hogql_query = await database_sync_to_async(prepare_ast_for_printing)(
-        query_node,
-        context=context,
-        dialect="clickhouse",
-        settings=settings,
-        stack=[],
-        resolver_factory=bounded_resolver_factory_for_view(view_name),
+        query_node, context=context, dialect="clickhouse", settings=settings, stack=[]
     )
 
     if prepared_hogql_query is None:
@@ -281,7 +273,7 @@ async def get_query_row_count(
         return count
 
 
-async def hogql_table(query: str, team: Team, logger: FilteringBoundLogger, view_name: str | None = None):
+async def hogql_table(query: str, team: Team, logger: FilteringBoundLogger):
     """Execute a HogQL query and yield batches of results."""
     query_node = parse_select(query)
     if query_node is None:
@@ -297,14 +289,8 @@ async def hogql_table(query: str, team: Team, logger: FilteringBoundLogger, view
     )
     context.database = await database_sync_to_async(Database.create_for)(team=team, modifiers=context.modifiers)
 
-    factory = bounded_resolver_factory_for_view(view_name)
     prepared_hogql_query = await database_sync_to_async(prepare_ast_for_printing)(
-        query_node,
-        context=context,
-        dialect="clickhouse",
-        settings=settings,
-        stack=[],
-        resolver_factory=factory,
+        query_node, context=context, dialect="clickhouse", settings=settings, stack=[]
     )
     if prepared_hogql_query is None:
         raise EmptyHogQLResponseColumnsError()
@@ -378,12 +364,7 @@ async def hogql_table(query: str, team: Team, logger: FilteringBoundLogger, view
     settings.preferred_block_size_bytes = MB_100_IN_BYTES
 
     arrow_prepared_hogql_query = await database_sync_to_async(prepare_ast_for_printing)(
-        query_node,
-        context=context,
-        dialect="clickhouse",
-        stack=[],
-        settings=settings,
-        resolver_factory=factory,
+        query_node, context=context, dialect="clickhouse", stack=[], settings=settings
     )
 
     if arrow_prepared_hogql_query is None:
@@ -473,7 +454,7 @@ async def materialize_view_activity(inputs: MaterializeViewInputs) -> Materializ
 
         hogql_query = typing.cast(dict, saved_query.query)["query"]
         try:
-            rows_expected = await get_query_row_count(hogql_query, team, logger, view_name=saved_query.name)
+            rows_expected = await get_query_row_count(hogql_query, team, logger)
             await logger.ainfo(f"Expected rows: {rows_expected}")
             job.rows_expected = rows_expected
             await database_sync_to_async(job.save)()
@@ -485,9 +466,7 @@ async def materialize_view_activity(inputs: MaterializeViewInputs) -> Materializ
         row_count = 0
         storage_options = _get_aws_storage_options()
         delta_table: deltalake.DeltaTable | None = None
-        async for index, res in asyncstdlib.enumerate(
-            hogql_table(hogql_query, team, logger, view_name=saved_query.name)
-        ):
+        async for index, res in asyncstdlib.enumerate(hogql_table(hogql_query, team, logger)):
             batch, ch_types = res
             batch = _transform_unsupported_decimals(batch)
             batch = _transform_date_and_datetimes(batch, ch_types)

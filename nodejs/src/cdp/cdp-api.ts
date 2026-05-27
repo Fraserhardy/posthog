@@ -41,12 +41,7 @@ import { NativeDestinationExecutorService } from './services/native-destination-
 import { SegmentDestinationExecutorService } from './services/segment-destination-executor.service'
 import { HOG_FUNCTION_TEMPLATES } from './templates'
 import { HogFunctionInvocationGlobals, HogFunctionType, MinimalLogEntry } from './types'
-import {
-    convertToHogFunctionInvocationGlobals,
-    isNativeHogFunction,
-    isSegmentPluginHogFunction,
-    sanitizeLogMessage,
-} from './utils'
+import { convertToHogFunctionInvocationGlobals, isNativeHogFunction, isSegmentPluginHogFunction } from './utils'
 import { convertToHogFunctionFilterGlobal } from './utils/hog-function-filtering'
 
 // Allowlist of safe content types for webhook responses to prevent XSS
@@ -410,14 +405,9 @@ export class CdpApi {
                 for (const invocation of invocations) {
                     invocation.id = invocationID
 
-                    const sensitiveValues = this.hogExecutor.getSensitiveValues(
-                        invocation.hogFunction,
-                        invocation.state.globals.inputs ?? {}
-                    )
                     const options: HogExecutorExecuteAsyncOptions = buildHogExecutorAsyncOptions(
                         mock_async_functions,
-                        logs,
-                        sensitiveValues
+                        logs
                     )
 
                     let response: any = null
@@ -940,8 +930,7 @@ export class CdpApi {
 
 const buildHogExecutorAsyncOptions = (
     mockAsyncFunctions: boolean,
-    logs: MinimalLogEntry[],
-    sensitiveValues?: string[]
+    logs: MinimalLogEntry[]
 ): HogExecutorExecuteAsyncOptions => {
     let mockFunctions: Record<string, (...args: any[]) => any> | undefined
 
@@ -949,19 +938,7 @@ const buildHogExecutorAsyncOptions = (
         mockFunctions = {}
         for (const name of getRegisteredAsyncFunctionNames()) {
             const handler = getAsyncFunctionHandler(name)!
-            mockFunctions[name] = (...args: any[]) => {
-                const startIndex = logs.length
-                const result = handler.mock(args, logs)
-                if (sensitiveValues?.length) {
-                    for (let i = startIndex; i < logs.length; i++) {
-                        logs[i] = {
-                            ...logs[i],
-                            message: sanitizeLogMessage([logs[i].message], sensitiveValues),
-                        }
-                    }
-                }
-                return result
-            }
+            mockFunctions[name] = (...args: any[]) => handler.mock(args, logs)
         }
     }
 

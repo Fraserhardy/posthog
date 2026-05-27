@@ -13,7 +13,6 @@ import type {
     MCPFeedbackCreateApi,
     MCPIntentClusterSnapshotApi,
     MCPMissingCapabilityCreateApi,
-    MCPSessionIntentApi,
     McpAnalyticsFeedbackListParams,
     McpAnalyticsMissingCapabilitiesListParams,
     McpAnalyticsSessionsListParams,
@@ -190,24 +189,6 @@ export const mcpAnalyticsSessionsList = async (
     return apiMutator<PaginatedMCPSessionListApi>(getMcpAnalyticsSessionsListUrl(projectId, params), {
         ...options,
         method: 'GET',
-    })
-}
-
-export const getMcpAnalyticsSessionsGenerateIntentUrl = (projectId: string, id: string) => {
-    return `/api/environments/${projectId}/mcp_analytics/sessions/${id}/generate_intent/`
-}
-
-/**
- * Generate (or return the cached) LLM summary of the agent's goal for a session, derived from its recorded $mcp_intents. The first call summarises and persists the result; subsequent calls return the stored summary.
- */
-export const mcpAnalyticsSessionsGenerateIntent = async (
-    projectId: string,
-    id: string,
-    options?: RequestInit
-): Promise<MCPSessionIntentApi> => {
-    return apiMutator<MCPSessionIntentApi>(getMcpAnalyticsSessionsGenerateIntentUrl(projectId, id), {
-        ...options,
-        method: 'POST',
     })
 }
 

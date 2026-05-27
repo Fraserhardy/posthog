@@ -8,7 +8,8 @@ from autoevals.partial import ScorerWithPartial
 from autoevals.ragas import AnswerSimilarity
 from braintrust import EvalCase, Score
 
-from products.feature_flags.backend.models.feature_flag import FeatureFlag
+from posthog.models import FeatureFlag
+
 from products.surveys.backend.max_tools import CreateSurveyTool, SimpleSurveyQuestion
 from products.surveys.backend.models import Survey
 

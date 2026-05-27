@@ -37,7 +37,7 @@ class FeatureFlagVisitor(
 ):
     @classmethod
     def get_model(cls) -> type[models.Model]:
-        from products.feature_flags.backend.models.feature_flag import FeatureFlag
+        from posthog.models.feature_flag import FeatureFlag
 
         return FeatureFlag
 

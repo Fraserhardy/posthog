@@ -1,6 +1,5 @@
 from django.shortcuts import get_object_or_404
-from posthog.models import ChangeRequest, Cohort, Notebook
-from products.product_analytics.backend.models.insight import Insight
+from posthog.models import ChangeRequest, Cohort, Insight, Notebook
 from products.actions.backend.models.action import Action
 from posthog.models.personal_api_key import PersonalAPIKey
 from posthog.models.project import Project

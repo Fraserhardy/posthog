@@ -131,11 +131,12 @@ export function ReplayScannersScene(): JSX.Element {
             sorter: (a, b) => a.scanner_type.localeCompare(b.scanner_type),
         },
         {
-            title: 'Description',
-            key: 'description',
+            title: 'Config',
+            key: 'config',
+            width: '40%',
             render: (_, scanner) => (
-                <div className="text-sm text-muted truncate max-w-md">
-                    {scanner.description || <span className="italic">No description</span>}
+                <div className="text-sm font-mono bg-bg-light border rounded px-2 py-1 truncate">
+                    {scanner.scanner_config.prompt || '(empty)'}
                 </div>
             ),
         },

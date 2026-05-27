@@ -48,7 +48,7 @@ whether the test should just be deleted.
 |---|---|---|---|---|
 | `e2e/annotations.spec.ts:9` | Annotations loaded | **B / E** | (none — page-load smoke test) | Annotations / Product analytics |
 | `e2e/toolbar.spec.ts:4` | Toolbar loads | **B / E** | (none — loads the toolbar against a demo URL) | Toolbar |
-| `e2e/signup.spec.ts:90` | Can create user account with first name, last name and organization name | **E** | (none — bare skip, no comment) | Growth |
+| ~~`e2e/signup.spec.ts:90`~~ | ~~Can create user account with first name, last name and organization name~~ | ~~**E**~~ | **Resolved** — unskipped after the file gained a `beforeAll` that sets the `EMAIL_HOST` instance setting (the same condition CI satisfies via env var); see commit on this branch | — |
 | `e2e/signup.spec.ts:219` | Shows redirect notice if redirecting for maintenance | **A** | `// TODO un-skip. // Skipping test as it was failing on master, see <internal Slack link>` (see security note below) | Growth |
 | `e2e/events.spec.ts:60` | Apply 1 overall filter | **E** | (none — bare skip) | Product analytics |
 | `e2e/events.spec.ts:70` | Separates feature flag properties into their own tab | **E** | (none — bare skip) | Product analytics / Feature flags |
@@ -75,11 +75,14 @@ whether the test should just be deleted.
 | **B** — outdated UI | 2 | (`annotations.spec.ts:9`, `surveys/crud.spec.ts:55`) — owners decide update vs delete |
 | **C** — temporary hack | 1 (×7 expanded) | `insight-navigation.spec.ts:19` — strongly recommend deleting; "skipping to get a single passing test in" is not a sustainable bookmark |
 | **D** — feature missing coverage | 2 | Both in `surveys/quickcreate.spec.ts` — FF feedback tab integration |
-| **E** — unknown / bare skip | 7 | Default to delete unless owner claims them |
+| **E** — unknown / bare skip | 6 | Default to delete unless owner claims them |
 
-The (E) and (C) buckets together are 8 of 15 skips with no good reason to keep
-them. Recommend deleting these at the start of Phase 2 rather than going
-through the ticket dance.
+The (E) and (C) buckets together are 7 of 14 remaining skips with no good
+reason to keep them. Recommend deleting these at the start of Phase 2 rather
+than going through the ticket dance.
+
+(Total dropped from 15 → 14: `signup.spec.ts:90` resolved via `beforeAll`
+setting `EMAIL_HOST` — see commit on this branch.)
 
 ## Security follow-up — internal Slack link in code
 

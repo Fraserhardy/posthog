@@ -7,7 +7,7 @@ from posthog.hogql.context import HogQLContext
 from posthog.hogql.errors import QueryError
 from posthog.hogql.escape_sql import escape_clickhouse_string
 from posthog.hogql.parser import parse_expr, parse_select
-from posthog.hogql.resolver import ResolverFactory, resolve_types
+from posthog.hogql.resolver import resolve_types
 from posthog.hogql.visitor import TraversingVisitor, clone_expr
 
 
@@ -16,11 +16,10 @@ def resolve_in_cohorts(
     dialect: HogQLDialect,
     stack: Optional[list[ast.SelectQuery]] = None,
     context: HogQLContext | None = None,
-    resolver_factory: ResolverFactory | None = None,
 ):
     if context is None:
         raise QueryError("context is required to resolve IN COHORT")
-    InCohortResolver(stack=stack, dialect=dialect, context=context, resolver_factory=resolver_factory).visit(node)
+    InCohortResolver(stack=stack, dialect=dialect, context=context).visit(node)
 
 
 def resolve_in_cohorts_conjoined(
@@ -28,11 +27,8 @@ def resolve_in_cohorts_conjoined(
     dialect: HogQLDialect,
     context: HogQLContext,
     stack: Optional[list[ast.SelectQuery]] = None,
-    resolver_factory: ResolverFactory | None = None,
 ):
-    MultipleInCohortResolver(stack=stack, dialect=dialect, context=context, resolver_factory=resolver_factory).visit(
-        node
-    )
+    MultipleInCohortResolver(stack=stack, dialect=dialect, context=context).visit(node)
 
 
 class CohortCompareOperationTraverser(TraversingVisitor):
@@ -58,15 +54,11 @@ class MultipleInCohortResolver(TraversingVisitor):
         dialect: HogQLDialect,
         context: HogQLContext,
         stack: Optional[list[ast.SelectQuery]] = None,
-        resolver_factory: ResolverFactory | None = None,
     ):
         super().__init__()
         self.stack: list[ast.SelectQuery] = stack or []
         self.context = context
         self.dialect = dialect
-        # accepted for signature parity with InCohortResolver; this resolver does not
-        # currently invoke resolve_types itself, so the factory is held but unused
-        self.resolver_factory = resolver_factory
 
     def visit_cte(self, node: ast.CTE):
         self.visit(node.expr)
@@ -290,15 +282,11 @@ class InCohortResolver(TraversingVisitor):
         dialect: HogQLDialect,
         context: HogQLContext,
         stack: Optional[list[ast.SelectQuery]] = None,
-        resolver_factory: ResolverFactory | None = None,
     ):
         super().__init__()
         self.stack: list[ast.SelectQuery] = stack or []
         self.context = context
         self.dialect = dialect
-        # forwarded to nested resolve_types/resolve_lazy_tables calls so a caller-supplied
-        # factory (e.g. BoundedResolver) applies to cohort-join subqueries built mid-transform
-        self.resolver_factory = resolver_factory
 
     def visit_select_query(self, node: ast.SelectQuery):
         self.stack.append(node)
@@ -427,14 +415,10 @@ class InCohortResolver(TraversingVisitor):
                 raise QueryError("Could not resolve current select scope")
             new_join = cast(
                 ast.JoinExpr,
-                resolve_types(
-                    new_join, self.context, self.dialect, [current_scope], resolver_factory=self.resolver_factory
-                ),
+                resolve_types(new_join, self.context, self.dialect, [current_scope]),
             )
             if inline_ast is not None:
-                resolve_lazy_tables(
-                    new_join, self.dialect, [self.stack[-1]], self.context, resolver_factory=self.resolver_factory
-                )
+                resolve_lazy_tables(new_join, self.dialect, [self.stack[-1]], self.context)
                 if self.context.property_swapper:
                     new_join = cast(
                         ast.JoinExpr,
@@ -447,7 +431,6 @@ class InCohortResolver(TraversingVisitor):
                 self.context,
                 self.dialect,
                 [current_scope],
-                resolver_factory=self.resolver_factory,
             )
             new_join.constraint.expr.right = clone_expr(compare.left)
             if last_join:
@@ -464,8 +447,5 @@ class InCohortResolver(TraversingVisitor):
             self.context,
             self.dialect,
             [current_scope],
-            resolver_factory=self.resolver_factory,
         )
-        compare.right = resolve_types(
-            ast.Constant(value=1), self.context, self.dialect, [current_scope], resolver_factory=self.resolver_factory
-        )
+        compare.right = resolve_types(ast.Constant(value=1), self.context, self.dialect, [current_scope])

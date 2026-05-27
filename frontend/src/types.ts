@@ -5379,7 +5379,6 @@ export type APIScopeObject =
     | 'project'
     | 'property_definition'
     | 'query'
-    | 'query_performance'
     | 'replay_scanner'
     | 'revenue_analytics'
     | 'session_recording'
@@ -5589,7 +5588,6 @@ export enum ActivityScope {
     LOGS_ALERT_CONFIGURATION = 'LogsAlertConfiguration',
     PRODUCT_TOUR = 'ProductTour',
     TICKET = 'Ticket',
-    INSTANCE_SETTING = 'InstanceSetting',
 }
 
 export type CommentType = {
@@ -6523,8 +6521,6 @@ export type CyclotronJobInputSchemaType = {
     key: string
     label: string
     choices?: { value: string; label: string }[]
-    /** For `choice` inputs: render as a searchable select instead of a plain dropdown. */
-    searchable?: boolean
     required?: boolean
     default?: any
     secret?: boolean

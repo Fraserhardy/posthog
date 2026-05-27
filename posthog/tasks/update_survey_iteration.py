@@ -1,7 +1,8 @@
 from datetime import date
 from typing import Any
 
-from products.feature_flags.backend.models.feature_flag import FeatureFlag
+from posthog.models import FeatureFlag
+
 from products.surveys.backend.models import Survey
 
 

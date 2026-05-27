@@ -4,7 +4,7 @@ from django.db import models
 # DEPRECATED - do not use
 class FeatureFlagRoleAccess(models.Model):
     feature_flag = models.ForeignKey(
-        "feature_flags.FeatureFlag",
+        "posthog.FeatureFlag",
         on_delete=models.CASCADE,
         related_name="access",
         related_query_name="access",

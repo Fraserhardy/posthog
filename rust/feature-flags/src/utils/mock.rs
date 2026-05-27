@@ -340,6 +340,7 @@ mod tests {
                 multivariate: None,
                 aggregation_group_type_index: None,
                 payloads: None,
+                super_groups: None,
                 feature_enrollment: None,
                 holdout: None,
             },

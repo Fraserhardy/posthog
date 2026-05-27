@@ -18,8 +18,7 @@ from langchain_core.tools import tool
 from posthog.schema import ArtifactContentType, ArtifactSource, AssistantToolCallMessage
 
 from posthog.exceptions_capture import capture_exception
-
-from products.product_analytics.backend.models.insight import Insight
+from posthog.models import Insight
 
 from ee.hogai.context.insight.query_executor import AssistantQueryExecutor
 from ee.hogai.core.node import AssistantNode

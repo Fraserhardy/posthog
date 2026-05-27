@@ -359,8 +359,6 @@ export type HogFunctionInputSchemaType = {
     key: string
     label?: string
     choices?: { value: string; label: string }[]
-    /** For `choice` inputs: render as a searchable select instead of a plain dropdown. */
-    searchable?: boolean
     required?: boolean
     default?: any
     secret?: boolean

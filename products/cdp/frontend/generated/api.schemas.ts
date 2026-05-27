@@ -285,7 +285,6 @@ export interface InputsSchemaItemApi {
     key: string
     label?: string
     choices?: InputsSchemaItemApiChoicesItem[]
-    searchable?: boolean
     required?: boolean
     default?: unknown
     secret?: boolean

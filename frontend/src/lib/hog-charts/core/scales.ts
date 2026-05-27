@@ -319,8 +319,6 @@ export function createBarScales(
         bandPadding?: number
         groupPadding?: number
         stackedSeries?: Series[]
-        /** Cap on the band-axis range in px — clusters bars at the start of the plot when set. */
-        maxBandRange?: number
     } = {}
 ): BarScaleSet {
     const {
@@ -330,19 +328,19 @@ export function createBarScales(
         bandPadding = 0.2,
         groupPadding = 0.1,
         stackedSeries,
-        maxBandRange,
     } = options
 
     const isHorizontal = axisOrientation === 'horizontal'
     const tickCount = yTickCountForHeight(isHorizontal ? dimensions.plotWidth : dimensions.plotHeight)
 
-    const bandAxisStart = isHorizontal ? dimensions.plotTop : dimensions.plotLeft
-    const bandAxisExtent = isHorizontal ? dimensions.plotHeight : dimensions.plotWidth
-    const cappedExtent = maxBandRange != null ? Math.min(bandAxisExtent, maxBandRange) : bandAxisExtent
     const band = d3
         .scaleBand<string>()
         .domain(labels)
-        .range([bandAxisStart, bandAxisStart + cappedExtent])
+        .range(
+            isHorizontal
+                ? [dimensions.plotTop, dimensions.plotTop + dimensions.plotHeight]
+                : [dimensions.plotLeft, dimensions.plotLeft + dimensions.plotWidth]
+        )
         .paddingInner(bandPadding)
         .paddingOuter(bandPadding / 2)
 
