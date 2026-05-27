@@ -6017,10 +6017,10 @@ export type BatchExportServicePostgres = {
     type: 'Postgres'
     integration?: number
     config: {
-        user: string
-        password: string
-        host: string
-        port: number
+        user?: string
+        password?: string
+        host?: string
+        port?: number
         database: string
         schema: string
         table_name: string
