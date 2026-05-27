@@ -5368,6 +5368,7 @@ export type APIScopeObject =
     | 'llm_provider_key'
     | 'llm_skill'
     | 'logs'
+    | 'metrics'
     | 'notebook'
     | 'organization'
     | 'organization_integration'
