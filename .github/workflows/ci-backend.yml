@@ -1772,9 +1772,6 @@ jobs:
               shell: bash
               env:
                   AWS_S3_ALLOW_UNSAFE_RENAME: 'true'
-                  AWS_ACCESS_KEY_ID: test
-                  AWS_SECRET_ACCESS_KEY: test
-                  AWS_EC2_METADATA_DISABLED: 'true'
                   MODAL_TOKEN_ID: ${{ needs.changes.outputs.tasks_temporal == 'true' && secrets.MODAL_TOKEN_ID || '' }}
                   MODAL_TOKEN_SECRET: ${{ needs.changes.outputs.tasks_temporal == 'true' && secrets.MODAL_TOKEN_SECRET || '' }}
               run: |
