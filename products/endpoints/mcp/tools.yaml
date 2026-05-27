@@ -177,9 +177,9 @@ tools:
             idempotent: true
         title: Get endpoints last execution times
         description: >
-            Get the most recent execution time per endpoint (over the past 6 months, personal API key calls only).
-            Pass an array of endpoint names; returns rows shaped [name, last_executed_at]. Endpoints never called
-            in the window are omitted from the response. Use this to find unused endpoints during an audit.
+            Get the most recent execution time per endpoint (over the past 6 months, personal API key calls only). Pass
+            an array of endpoint names; returns rows shaped [name, last_executed_at]. Endpoints never called in the
+            window are omitted from the response. Use this to find unused endpoints during an audit.
         include_params:
             - names
     endpoints-materialization-preview-create:
