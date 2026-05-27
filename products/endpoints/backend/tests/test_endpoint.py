@@ -853,6 +853,51 @@ class TestEndpoint(ClickhouseTestMixin, APIBaseTest):
         self.assertIsInstance(query_status["results"], list)
         self.assertEqual(len(query_status["results"]), 0)
 
+    def test_get_versions_last_execution_times_empty_names(self):
+        """Empty names list short-circuits to a complete, empty result."""
+        data = EndpointLastExecutionTimesRequest(names=[]).model_dump()
+
+        response = self.client.post(
+            f"/api/environments/{self.team.id}/endpoints/versions_last_execution_times/", data, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        query_status = response.json()["query_status"]
+        self.assertTrue(query_status["complete"])
+        self.assertIsNone(query_status["results"])
+
+    def test_get_versions_last_execution_times_after_endpoint_execution(self):
+        """Per-version timestamps surface for endpoints that have been executed."""
+        create_endpoint_with_version(
+            name="test_versioned",
+            team=self.team,
+            query={"kind": "HogQLQuery", "query": "SELECT 1"},
+            created_by=self.user,
+            is_active=True,
+        )
+
+        response = self.client.get(
+            f"/api/environments/{self.team.id}/endpoints/test_versioned/run/",
+            headers={"authorization": f"Bearer {self.api_key}"},
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        sleep(3)
+
+        data = {"names": ["test_versioned", "nonexistent_query"]}
+        response = self.client.post(
+            f"/api/environments/{self.team.id}/endpoints/versions_last_execution_times/", data, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.json())
+        results = response.json()["query_status"]["results"]
+        self.assertIsInstance(results, list)
+        self.assertGreaterEqual(len(results), 1, results)
+
+        per_version = {(row[0], row[1]): row[2] for row in results if len(row) >= 3}
+        self.assertIn(("test_versioned", 1), per_version, per_version)
+        self.assertIsNotNone(datetime.fromisoformat(per_version[("test_versioned", 1)]))
+
     def test_get_last_execution_times_of_endpoint_not_executed(self):
         """Test getting last execution times of a endpoint that has not been executed."""
         create_endpoint_with_version(
