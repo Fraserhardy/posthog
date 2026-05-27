@@ -313,3 +313,23 @@ export const endpointsLastExecutionTimesCreate = async (
         body: JSON.stringify(endpointLastExecutionTimesRequestApi),
     })
 }
+
+export const getEndpointsVersionsLastExecutionTimesCreateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/endpoints/versions_last_execution_times/`
+}
+
+/**
+ * Get last execution times in the past 6 months for endpoints, broken down per version. Returns rows shaped [name, version, last_executed_at]. Only versions that were actually executed appear; an endpoint missing from the response was never called via personal API key.
+ */
+export const endpointsVersionsLastExecutionTimesCreate = async (
+    projectId: string,
+    endpointLastExecutionTimesRequestApi: EndpointLastExecutionTimesRequestApi,
+    options?: RequestInit
+): Promise<QueryStatusResponseApi> => {
+    return apiMutator<QueryStatusResponseApi>(getEndpointsVersionsLastExecutionTimesCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(endpointLastExecutionTimesRequestApi),
+    })
+}

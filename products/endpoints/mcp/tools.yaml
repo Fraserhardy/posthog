@@ -178,3 +178,6 @@ tools:
     endpoints-update:
         operation: endpoints_update
         enabled: false
+    endpoints-versions-last-execution-times-create:
+        operation: endpoints_versions_last_execution_times_create
+        enabled: false

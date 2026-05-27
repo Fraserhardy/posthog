@@ -171,3 +171,10 @@ export const EndpointsRunCreateBody = /* @__PURE__ */ zod
 export const EndpointsLastExecutionTimesCreateBody = /* @__PURE__ */ zod.object({
     names: zod.array(zod.string()),
 })
+
+/**
+ * Get last execution times in the past 6 months for endpoints, broken down per version. Returns rows shaped [name, version, last_executed_at]. Only versions that were actually executed appear; an endpoint missing from the response was never called via personal API key.
+ */
+export const EndpointsVersionsLastExecutionTimesCreateBody = /* @__PURE__ */ zod.object({
+    names: zod.array(zod.string()),
+})
