@@ -164,6 +164,13 @@ class Subscription(ModelActivityMixin, models.Model):
             self._rrule = self.rrule
 
     def save(self, *args, **kwargs) -> None:
+        # Keep resource_type in lockstep with the relation, so no write path leaves it as a stale "insight".
+        resolved_resource_type = self._resolve_resource_type()
+        if resolved_resource_type != self.resource_type:
+            self.resource_type = resolved_resource_type
+            if "update_fields" in kwargs and kwargs["update_fields"] is not None:
+                kwargs["update_fields"] = [*kwargs["update_fields"], "resource_type"]
+
         # Only if the schedule has changed do we update the next delivery date
         # _rrule may not be set if object was loaded with deferred fields
         if not self.id or str(getattr(self, "_rrule", None)) != str(self.rrule):
@@ -171,6 +178,16 @@ class Subscription(ModelActivityMixin, models.Model):
             if "update_fields" in kwargs:
                 kwargs["update_fields"].append("next_delivery_date")
         super().save(*args, **kwargs)
+
+    def _resolve_resource_type(self) -> str:
+        # Classify by relation; an AI-prompt subscription has no relation but carries a prompt.
+        if self.insight_id:
+            return self.ResourceType.INSIGHT
+        if self.dashboard_id:
+            return self.ResourceType.DASHBOARD
+        if self.prompt:
+            return self.ResourceType.AI_PROMPT
+        return self.resource_type
 
     @staticmethod
     def _build_rrule(

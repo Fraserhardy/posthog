@@ -105,40 +105,38 @@ class TestSubscriptionActivityLog(BaseTest):
 
     @parameterized.expand(
         [
-            ("title_wins", "My title", "the prompt", "My title"),
-            ("prompt_snippet_when_no_title", None, "x" * 80, "x" * 60),
-            ("whitespace_only_prompt_falls_back", None, "   ", "AI report"),
-            ("empty_falls_back", None, None, "AI report"),
+            ("ai_title_wins", Subscription.ResourceType.AI_PROMPT, None, "My title", "the prompt", "My title"),
+            ("ai_prompt_snippet_when_no_title", Subscription.ResourceType.AI_PROMPT, None, None, "x" * 80, "x" * 60),
+            ("ai_whitespace_prompt_falls_back", Subscription.ResourceType.AI_PROMPT, None, None, "   ", "AI report"),
+            ("ai_empty_falls_back", Subscription.ResourceType.AI_PROMPT, None, None, None, "AI report"),
+            ("insight_uses_insight_name", Subscription.ResourceType.INSIGHT, "insight", None, None, "Signups by week"),
+            ("dashboard_uses_dashboard_name", Subscription.ResourceType.DASHBOARD, "dashboard", None, None, "Growth"),
         ]
     )
-    def test_ai_display_name(self, _name: str, title: str | None, prompt: str | None, expected: str):
+    def test_display_name(
+        self,
+        _name: str,
+        resource_type: "Subscription.ResourceType",
+        relation: str | None,
+        title: str | None,
+        prompt: str | None,
+        expected: str,
+    ):
+        relation_factories = {
+            "insight": lambda: {"insight": Insight.objects.create(team=self.team, name="Signups by week")},
+            "dashboard": lambda: {"dashboard": Dashboard.objects.create(team=self.team, name="Growth")},
+        }
         subscription = Subscription(
-            resource_type=Subscription.ResourceType.AI_PROMPT,
+            resource_type=resource_type,
             title=title,
             prompt=prompt,
             frequency="weekly",
             interval=1,
             start_date=datetime(2022, 1, 1, tzinfo=ZoneInfo("UTC")),
+            **(relation_factories[relation]() if relation else {}),
         )
 
         assert subscription.display_name == expected
-
-    def test_display_name_for_insight_and_dashboard(self):
-        insight_sub = self._create_subscription(
-            resource_type=Subscription.ResourceType.INSIGHT,
-            prompt=None,
-            title=None,
-            insight=Insight.objects.create(team=self.team, name="Signups by week"),
-        )
-        dashboard_sub = self._create_subscription(
-            resource_type=Subscription.ResourceType.DASHBOARD,
-            prompt=None,
-            title=None,
-            dashboard=Dashboard.objects.create(team=self.team, name="Growth"),
-        )
-
-        assert insight_sub.display_name == "Signups by week"
-        assert dashboard_sub.display_name == "Growth"
 
     def test_soft_deleting_ai_subscription_records_change(self):
         subscription = self._create_subscription()
