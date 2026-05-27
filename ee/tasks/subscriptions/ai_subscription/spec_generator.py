@@ -36,9 +36,10 @@ DEFAULT_SYNTHESIS_MODEL = "gpt-4.1-mini"
 # `max_retries` on `MaxChatOpenAI` (3), prevents a single stuck request from soaking
 # the delivery budget.
 _PLANNER_LLM_TIMEOUT_SECONDS = 90.0
-# Whitelist of models a user can opt their subscription into via `ai_config`.
-# Without this, any authenticated user could PATCH `ai_config: {"model": ...}` and
-# force scheduled deliveries to use an arbitrarily expensive model.
+# Whitelist of models a subscription's `ai_config` may opt into. The API no longer
+# exposes `ai_config`, so this is the delivery-time guard of last resort: even if a
+# non-default model reaches `ai_config` (legacy rows, a future re-exposure), only a
+# whitelisted model ever drives a scheduled delivery — never an arbitrarily expensive one.
 ALLOWED_AI_MODELS = frozenset({"gpt-4.1-mini", "gpt-4.1-nano", "gpt-4.1"})
 
 
