@@ -4,23 +4,31 @@ from posthog.temporal.subscriptions.activities import (
     create_export_assets,
     deliver_subscription,
     fetch_due_subscriptions_activity,
+    generate_ai_subscription_report,
     update_delivery_record,
     validate_subscription_for_delivery,
 )
 from posthog.temporal.subscriptions.snapshot_activities import snapshot_subscription_insights
 from posthog.temporal.subscriptions.workflows import (
     HandleSubscriptionValueChangeWorkflow,
+    ProcessAISubscriptionWorkflow,
     ProcessSubscriptionWorkflow,
     ScheduleAllSubscriptionsWorkflow,
 )
 
-WORKFLOWS = [ScheduleAllSubscriptionsWorkflow, HandleSubscriptionValueChangeWorkflow, ProcessSubscriptionWorkflow]
+WORKFLOWS = [
+    ScheduleAllSubscriptionsWorkflow,
+    HandleSubscriptionValueChangeWorkflow,
+    ProcessSubscriptionWorkflow,
+    ProcessAISubscriptionWorkflow,
+]
 
 ACTIVITIES = [
     fetch_due_subscriptions_activity,
     validate_subscription_for_delivery,
     create_export_assets,
     deliver_subscription,
+    generate_ai_subscription_report,
     advance_next_delivery_date,
     create_delivery_record,
     update_delivery_record,

@@ -27,6 +27,8 @@ from posthog.temporal.subscriptions.types import (
     DeliverSubscriptionInputs,
     DeliverSubscriptionResult,
     FetchDueSubscriptionsActivityInputs,
+    GenerateAIReportInputs,
+    GenerateAIReportResult,
     RecipientResult,
     SubscriptionAbortInfo,
     SubscriptionInfo,
@@ -66,15 +68,16 @@ LOGGER = get_logger(__name__)
 # (it indicates a transient resolve failure that retries can recover from).
 NO_ASSETS_REASON = "No assets to deliver — likely a transient export pipeline failure; will retry on next schedule"
 
-# `SubscriptionDelivery.content_snapshot` key under which AI deliveries cache the
-# generated markdown so Temporal retries don't re-bill the planner + synthesis LLM.
-AI_MARKDOWN_SNAPSHOT_KEY = "ai_markdown"
+# `SubscriptionDelivery.content_snapshot` key the AI report markdown is written
+# under by `generate_ai_subscription_report` and read back by `deliver_subscription`.
+# This is the generate -> deliver handoff: the markdown can exceed Temporal's ~2 MiB
+# payload cap, so it travels through Postgres by reference rather than on the wire —
+# the same pattern insight snapshots use.
+AI_REPORT_SNAPSHOT_KEY = "ai_report"
 
 
-async def _load_cached_ai_markdown(delivery_id: uuid.UUID | None) -> str | None:
-    """Return a previously-persisted AI markdown for this delivery, or None."""
-    if delivery_id is None:
-        return None
+async def _load_ai_report(delivery_id: uuid.UUID) -> str | None:
+    """Read the report markdown the generation activity wrote onto this delivery row."""
 
     @database_sync_to_async(thread_sensitive=False)
     def _read() -> str | None:
@@ -84,32 +87,22 @@ async def _load_cached_ai_markdown(delivery_id: uuid.UUID | None) -> str | None:
             return None
         if not isinstance(snapshot, dict):
             return None
-        cached = snapshot.get(AI_MARKDOWN_SNAPSHOT_KEY)
-        return cached if isinstance(cached, str) and cached else None
+        report = snapshot.get(AI_REPORT_SNAPSHOT_KEY)
+        return report if isinstance(report, str) and report else None
 
     return await _read()
 
 
-async def _persist_ai_markdown(delivery_id: uuid.UUID | None, markdown: str) -> None:
-    """Write the generated markdown onto the delivery row so retries can reuse it."""
-    if delivery_id is None:
-        return
+async def _persist_ai_report(delivery_id: uuid.UUID, markdown: str) -> None:
+    """Write the generated report markdown onto the delivery row for the delivery activity."""
 
     @database_sync_to_async(thread_sensitive=False)
-    def _write() -> bool:
-        try:
-            delivery = SubscriptionDelivery.objects.get(pk=delivery_id)
-        except SubscriptionDelivery.DoesNotExist:
-            return False
-        delivery.content_snapshot = {**(delivery.content_snapshot or {}), AI_MARKDOWN_SNAPSHOT_KEY: markdown}
+    def _write() -> None:
+        delivery = SubscriptionDelivery.objects.get(pk=delivery_id)
+        delivery.content_snapshot = {**(delivery.content_snapshot or {}), AI_REPORT_SNAPSHOT_KEY: markdown}
         delivery.save(update_fields=["content_snapshot", "last_updated_at"])
-        return True
 
-    persisted = await _write()
-    if not persisted:
-        # Without this row we can't memoize across retries — Temporal would re-bill
-        # the planner + synthesis on each attempt with no diagnostic trail.
-        await LOGGER.awarning("deliver_subscription.ai_markdown_persist_skipped", delivery_id=str(delivery_id))
+    await _write()
 
 
 async def _persist_content_snapshot(
@@ -155,11 +148,12 @@ async def fetch_due_subscriptions_activity(inputs: FetchDueSubscriptionsActivity
                 if sub["created_by__distinct_id"]
                 else str(sub["team_id"]),
                 next_delivery_date=sub["next_delivery_date"].isoformat() if sub["next_delivery_date"] else None,
+                content_type=sub["content_type"],
             )
             for sub in Subscription.objects.filter(next_delivery_date__lte=now_with_buffer, deleted=False, enabled=True)
             .exclude(dashboard__deleted=True)
             .exclude(insight__deleted=True)
-            .values("id", "team_id", "created_by__distinct_id", "next_delivery_date")
+            .values("id", "team_id", "created_by__distinct_id", "next_delivery_date", "content_type")
         ]
 
     subscriptions = await get_subscriptions()
@@ -226,26 +220,10 @@ async def create_export_assets(inputs: CreateExportAssetsInputs) -> CreateExport
         target_type=subscription.target_type,
     )
 
-    # AI prompt short-circuit comes before the no-change guard: AI subs produce a
-    # fresh report each delivery, so an edit that only changed the prompt (and not
-    # `target_value`) still warrants a delivery, which the no-change guard would
-    # otherwise swallow.
-    if subscription.content_type == Subscription.ContentType.AI_PROMPT:
-        await LOGGER.ainfo(
-            "create_export_assets.ai_prompt_short_circuit",
-            subscription_id=inputs.subscription_id,
-        )
-        return CreateExportAssetsResult(
-            exported_asset_ids=[],
-            total_insight_count=0,
-            team_id=team.id,
-            distinct_id=str(subscription.created_by.distinct_id) if subscription.created_by else str(team.id),
-            target_type=subscription.target_type,
-            is_ai_prompt=True,
-        )
-
     # Early exit if target value hasn't changed — avoids creating orphaned assets
-    # for non-AI subs whose payload is identical to the previous delivery.
+    # for subs whose payload is identical to the previous delivery. AI-prompt subs
+    # never reach this activity (the scheduler routes them to
+    # ProcessAISubscriptionWorkflow), so no AI carve-out is needed here.
     if inputs.previous_value is not None and subscription.target_value == inputs.previous_value:
         await LOGGER.ainfo(
             "create_export_assets.no_change_skipping",
@@ -599,173 +577,201 @@ async def deliver_subscription(inputs: DeliverSubscriptionInputs) -> DeliverSubs
     return DeliverSubscriptionResult(recipient_results=recipient_results)
 
 
+@temporalio.activity.defn
+async def generate_ai_subscription_report(inputs: GenerateAIReportInputs) -> GenerateAIReportResult:
+    """Run the AI report pipeline (planner + HogQL + synthesis) and persist the markdown
+    onto the delivery row for `deliver_subscription` to ship.
+
+    This is the "decide what to send" phase, kept separate from delivery so the LLM work
+    runs once, up front, with its own retry policy. Terminal, non-self-healing failures
+    (org revoked AI-data-processing consent, prompt no longer valid) auto-disable the
+    subscription and return `aborted=True` so the workflow skips delivery and records the
+    failure. Transient LLM/network errors bubble up for the activity's Temporal retry.
+    """
+    subscription = await database_sync_to_async(
+        Subscription.objects.select_related("created_by", "team", "team__organization").get,
+        thread_sensitive=False,
+    )(pk=inputs.subscription_id)
+
+    # Idempotency on Temporal redispatch (worker crash mid-acknowledge, etc.):
+    # if a prior attempt already produced the report, don't re-bill the LLM — the
+    # whole point of the generate -> deliver split is that the LLM runs once.
+    if await _load_ai_report(inputs.delivery_id) is not None:
+        await LOGGER.ainfo("generate_ai_subscription_report.already_generated", subscription_id=subscription.id)
+        return GenerateAIReportResult(aborted=False)
+
+    # Mirror the `validate_subscription_for_delivery` / `deliver_subscription` guard: if a
+    # prior attempt already auto-disabled this sub (consent/prompt terminal failure) and
+    # Temporal redispatched, don't re-run the consent check or the LLM against a now-disabled
+    # subscription — just report the abort.
+    if not subscription.enabled:
+        await LOGGER.ainfo("generate_ai_subscription_report.already_disabled_skipping", subscription_id=subscription.id)
+        return GenerateAIReportResult(aborted=True)
+
+    # Consent is gated once, here, before any LLM cost — not at delivery. Creation-time
+    # gates fire only on create, so an org that revokes AI-data-processing approval
+    # afterwards must be caught before we ship project data to the LLM. Auto-disable
+    # (rather than silently skip) so the subscription stops re-firing and the creator is
+    # told how to restore it. `team__organization` is select_related above, so this is an
+    # in-memory attribute read (no DB I/O, no async wrapper needed).
+    if not subscription.team.organization.is_ai_data_processing_approved:
+        LOGGER.warning("generate_ai_subscription_report.consent_revoked", subscription_id=subscription.id)
+        aborted = await _auto_disable_and_return(subscription, AI_CONSENT_REVOKED_DISABLE_REASON, [])
+        return GenerateAIReportResult(aborted=True, recipient_results=aborted.recipient_results)
+
+    try:
+        markdown = await database_sync_to_async(generate_ai_subscription_markdown, thread_sensitive=False)(subscription)
+    except PromptRejectedError as exc:
+        # Structurally permanent: no creator, prompt now fails sanitization, or the
+        # planner returned a malformed plan. Re-firing wastes LLM tokens every cycle.
+        LOGGER.warning(
+            "generate_ai_subscription_report.prompt_rejected",
+            subscription_id=subscription.id,
+            reason=str(exc),
+        )
+        _capture_delivery_failed_event(subscription, exc)
+        # Seed a recipient result with the exception detail first — it carries planner
+        # context that the disable reason (appended next by `_auto_disable_and_return`)
+        # doesn't.
+        recipient_results = [
+            RecipientResult(
+                recipient=subscription.target_value,
+                status="failed",
+                error={"message": str(exc), "type": "PromptRejectedError"},
+            )
+        ]
+        aborted = await _auto_disable_and_return(subscription, AI_PROMPT_INVALID_DISABLE_REASON, recipient_results)
+        return GenerateAIReportResult(aborted=True, recipient_results=aborted.recipient_results)
+
+    await _persist_ai_report(inputs.delivery_id, markdown)
+    return GenerateAIReportResult(aborted=False)
+
+
 async def _deliver_ai_subscription(
     subscription: Subscription,
     inputs: DeliverSubscriptionInputs,
     recipient_results: list[RecipientResult],
 ) -> DeliverSubscriptionResult:
-    """Generate an AI report from the subscription's prompt and ship it to email or Slack.
+    """Ship the report `generate_ai_subscription_report` already produced to email or Slack.
 
-    Per-recipient outcomes are appended to `recipient_results` in the same shape as the
-    insight/dashboard delivery path so the downstream `update_delivery_record` activity
-    can persist them on the SubscriptionDelivery row. Transient errors (LLM 429, network
-    blip) bubble up so the activity's Temporal retry policy can recover them; terminal
-    errors (Slack permission revoked) auto-disable the subscription and return.
+    No LLM work happens here — the report is read back from the delivery row (the
+    generate -> deliver handoff). Consent and target-type validity were checked up front
+    in the AI workflow, so the only failures handled here are send-side: transient errors
+    bubble up for Temporal retry, terminal Slack errors auto-disable. Per-recipient
+    outcomes are appended to `recipient_results` in the same shape as the insight/dashboard
+    path so `update_delivery_record` can persist them.
     """
-    # Reject unsupported targets BEFORE running the LLM — otherwise every Temporal
-    # retry burns full planner + synthesis + HogQL costs against a sub that can never
-    # deliver.
-    if subscription.target_type not in (Subscription.SubscriptionTarget.EMAIL, Subscription.SubscriptionTarget.SLACK):
-        LOGGER.warning(
-            "deliver_subscription.ai_unsupported_target",
-            subscription_id=subscription.id,
-            target_type=subscription.target_type,
-        )
-        # `_auto_disable_and_return` already appends a `RecipientResult` derived from
-        # the `DisableReason` (description + key). The PromptRejectedError branch
-        # below appends a *separate* entry first because the exception message
-        # carries info that wouldn't otherwise reach the delivery record; here the
-        # disable reason already captures the full failure, so one entry suffices.
-        return await _auto_disable_and_return(subscription, UNSUPPORTED_TARGET_DISABLE_REASON, recipient_results)
+    if inputs.delivery_id is None:
+        # The AI workflow always creates the delivery row and runs generation before
+        # delivery, so a missing reference is a wiring bug, not a runtime state.
+        raise ApplicationError(f"AI delivery for subscription {subscription.id} has no delivery_id", non_retryable=True)
 
-    # Re-check AI-data-processing consent at delivery time. Creation gates fire only on
-    # create, so an org that revokes approval afterwards would otherwise keep shipping
-    # project data to the LLM on every scheduled tick. Auto-disable (rather than silently
-    # skip) so it stops re-firing and the creator is told how to restore it.
-    consent_approved = await database_sync_to_async(
-        lambda: subscription.team.organization.is_ai_data_processing_approved, thread_sensitive=False
-    )()
-    if not consent_approved:
-        LOGGER.warning("deliver_subscription.ai_consent_revoked", subscription_id=subscription.id)
-        return await _auto_disable_and_return(subscription, AI_CONSENT_REVOKED_DISABLE_REASON, recipient_results)
-
-    cached_markdown = await _load_cached_ai_markdown(inputs.delivery_id)
-    if cached_markdown is not None:
-        await LOGGER.ainfo(
-            "deliver_subscription.ai_markdown_cache_hit",
-            subscription_id=subscription.id,
-            delivery_id=str(inputs.delivery_id),
+    markdown = await _load_ai_report(inputs.delivery_id)
+    if markdown is None:
+        # Generation persists the report before delivery is scheduled, so a missing report
+        # means the row was lost. Non-retryable: re-running *delivery* can't regenerate the
+        # report, so retrying just burns attempts — fail loud rather than ship an empty report.
+        raise ApplicationError(
+            f"AI report missing for subscription {subscription.id} (delivery {inputs.delivery_id})",
+            non_retryable=True,
         )
-        markdown = cached_markdown
-    else:
-        try:
-            markdown = await database_sync_to_async(generate_ai_subscription_markdown, thread_sensitive=False)(
-                subscription
-            )
-        except PromptRejectedError as exc:
-            # PromptRejectedError is structurally permanent (no creator, prompt now fails
-            # post-hoc sanitization, planner returned malformed plan). Re-firing wastes
-            # LLM tokens every cycle, so auto-disable like the other terminal failures.
-            LOGGER.warning(
-                "deliver_subscription.ai_prompt_rejected",
-                subscription_id=subscription.id,
-                reason=str(exc),
-            )
-            _capture_delivery_failed_event(subscription, exc)
-            recipient_results.append(
-                RecipientResult(
-                    recipient=subscription.target_value,
-                    status="failed",
-                    error={"message": str(exc), "type": "PromptRejectedError"},
-                )
-            )
-            return await _auto_disable_and_return(subscription, AI_PROMPT_INVALID_DISABLE_REASON, recipient_results)
-        await _persist_ai_markdown(inputs.delivery_id, markdown)
 
     if subscription.target_type == Subscription.SubscriptionTarget.EMAIL:
-        emails = [e.strip() for e in subscription.target_value.split(",") if e.strip()]
-        if inputs.is_new_subscription_target and inputs.previous_value is not None:
-            previous_emails = {e.strip() for e in inputs.previous_value.split(",") if e.strip()}
-            emails = [e for e in emails if e not in previous_emails]
-        rendered_html = render_ai_email_html(markdown)
-        # Use the Temporal workflow_run_id as the MessagingRecord dedup disambiguator:
-        # stable across activity retries within one run (scheduled tick dedups correctly)
-        # but unique per run, so a "Test delivery" click — which spawns a fresh workflow —
-        # always sends. Falls back to next_delivery_date / per-day inside the helper for
-        # callers that don't run under a Temporal activity (tests, management commands).
-        try:
-            workflow_run_id: str | None = temporalio.activity.info().workflow_run_id
-        except RuntimeError:
-            # Not running inside a Temporal activity (e.g. unit test calling directly).
-            workflow_run_id = None
-        success_count = 0
-        last_error: Exception | None = None
-        for email in emails:
-            email = email.strip()
-            if not email:
-                continue
-            try:
-                await database_sync_to_async(send_email_ai_subscription_report, thread_sensitive=False)(
-                    email=email,
-                    subscription=subscription,
-                    markdown=markdown,
-                    rendered_html=rendered_html,
-                    delivery_run_id=workflow_run_id,
-                )
-                recipient_results.append(RecipientResult(recipient=email, status="success", error=None))
-                success_count += 1
-            except Exception as exc:
-                # Per-recipient failure is captured and reported; one bad recipient
-                # shouldn't fail the others (matches the non-AI path).
-                LOGGER.error(
-                    "deliver_subscription.ai_email_failed",
-                    subscription_id=subscription.id,
-                    email=email,
-                    exc_info=True,
-                )
-                capture_exception(exc)
-                _capture_delivery_failed_event(subscription, exc)
-                recipient_results.append(
-                    RecipientResult(
-                        recipient=email,
-                        status="failed",
-                        error={"message": str(exc), "type": type(exc).__name__},
-                    )
-                )
-                last_error = exc
-        # If every recipient failed (typical AI sub has a single recipient), the
-        # markdown is already cached on the delivery row, so a Temporal retry is
-        # cheap — let it through so transient SMTP/Customer.io blips can recover.
-        if last_error is not None and success_count == 0:
-            raise last_error
-        return DeliverSubscriptionResult(recipient_results=recipient_results)
-
+        return await _deliver_ai_email(subscription, inputs, markdown, recipient_results)
     if subscription.target_type == Subscription.SubscriptionTarget.SLACK:
+        return await _deliver_ai_slack(subscription, markdown, recipient_results)
+    # `validate_subscription_for_delivery` auto-disables unsupported targets up front,
+    # so reaching here means an invariant was violated.
+    raise ApplicationError(
+        f"AI delivery reached an unsupported target {subscription.target_type!r}", non_retryable=True
+    )
+
+
+async def _deliver_ai_email(
+    subscription: Subscription,
+    inputs: DeliverSubscriptionInputs,
+    markdown: str,
+    recipient_results: list[RecipientResult],
+) -> DeliverSubscriptionResult:
+    emails = [e.strip() for e in subscription.target_value.split(",") if e.strip()]
+    if inputs.is_new_subscription_target and inputs.previous_value is not None:
+        previous_emails = {e.strip() for e in inputs.previous_value.split(",") if e.strip()}
+        emails = [e for e in emails if e not in previous_emails]
+    rendered_html = render_ai_email_html(markdown)
+    # workflow_run_id disambiguates the MessagingRecord dedup key: stable across activity
+    # retries within one run (a scheduled tick dedups its own retries) but unique per run,
+    # so a fresh "Test delivery" click (new workflow run) gets a fresh key and sends.
+    # Delivery always runs inside a Temporal activity now, so read it directly; tests that
+    # exercise the send helper in isolation pass `delivery_run_id` themselves.
+    workflow_run_id = temporalio.activity.info().workflow_run_id
+
+    success_count = 0
+    last_error: Exception | None = None
+    for email in emails:
         try:
-            await database_sync_to_async(send_slack_ai_subscription_report, thread_sensitive=False)(
-                subscription=subscription, markdown=markdown
+            await database_sync_to_async(send_email_ai_subscription_report, thread_sensitive=False)(
+                email=email,
+                subscription=subscription,
+                markdown=markdown,
+                rendered_html=rendered_html,
+                delivery_run_id=workflow_run_id,
             )
-            recipient_results.append(RecipientResult(recipient=subscription.target_value, status="success", error=None))
-            return DeliverSubscriptionResult(recipient_results=recipient_results)
-        except SlackIntegrationMissingError as exc:
-            # Integration was disconnected between the user's last edit and now;
-            # auto-disable rather than re-firing into a silent no-op every cycle.
-            LOGGER.warning(
-                "deliver_subscription.ai_slack_no_integration",
-                subscription_id=subscription.id,
-            )
-            _capture_delivery_failed_event(subscription, exc)
-            return await _auto_disable_and_return(subscription, SLACK_DISCONNECTED_DISABLE_REASON, recipient_results)
+            recipient_results.append(RecipientResult(recipient=email, status="success", error=None))
+            success_count += 1
         except Exception as exc:
-            slack_error_code = exc.response.get("error") if isinstance(exc, SlackApiError) else None
-            is_user_config_error = slack_error_code in SLACK_USER_CONFIG_ERRORS
+            # One bad recipient shouldn't fail the others (matches the non-AI path).
             LOGGER.error(
-                "deliver_subscription.ai_slack_failed",
-                subscription_id=subscription.id,
-                slack_error=slack_error_code,
-                exc_info=True,
+                "deliver_subscription.ai_email_failed", subscription_id=subscription.id, email=email, exc_info=True
             )
             capture_exception(exc)
             _capture_delivery_failed_event(subscription, exc)
-            if is_user_config_error:
-                # Won't self-heal without user action — auto-disable so the subscription
-                # stops re-firing every cycle and burning LLM tokens.
-                return await _auto_disable_and_return(
-                    subscription, SLACK_PERMISSION_REVOKED_DISABLE_REASON, recipient_results
+            recipient_results.append(
+                RecipientResult(
+                    recipient=email, status="failed", error={"message": str(exc), "type": type(exc).__name__}
                 )
-            raise  # Transient Slack errors — let Temporal retry
+            )
+            last_error = exc
+    # If every recipient failed, raise so Temporal retries — the report is already
+    # persisted, so the retry re-sends without re-running the LLM pipeline.
+    if last_error is not None and success_count == 0:
+        raise last_error
+    return DeliverSubscriptionResult(recipient_results=recipient_results)
 
-    raise AssertionError(f"Unreachable: target_type gate already rejected {subscription.target_type!r}")
+
+async def _deliver_ai_slack(
+    subscription: Subscription,
+    markdown: str,
+    recipient_results: list[RecipientResult],
+) -> DeliverSubscriptionResult:
+    try:
+        await database_sync_to_async(send_slack_ai_subscription_report, thread_sensitive=False)(
+            subscription=subscription, markdown=markdown
+        )
+        recipient_results.append(RecipientResult(recipient=subscription.target_value, status="success", error=None))
+        return DeliverSubscriptionResult(recipient_results=recipient_results)
+    except SlackIntegrationMissingError as exc:
+        # Integration was disconnected since the user's last edit; auto-disable rather
+        # than re-firing into a silent no-op every cycle.
+        LOGGER.warning("deliver_subscription.ai_slack_no_integration", subscription_id=subscription.id)
+        _capture_delivery_failed_event(subscription, exc)
+        return await _auto_disable_and_return(subscription, SLACK_DISCONNECTED_DISABLE_REASON, recipient_results)
+    except Exception as exc:
+        slack_error_code = exc.response.get("error") if isinstance(exc, SlackApiError) else None
+        is_user_config_error = slack_error_code in SLACK_USER_CONFIG_ERRORS
+        LOGGER.error(
+            "deliver_subscription.ai_slack_failed",
+            subscription_id=subscription.id,
+            slack_error=slack_error_code,
+            exc_info=True,
+        )
+        capture_exception(exc)
+        _capture_delivery_failed_event(subscription, exc)
+        if is_user_config_error:
+            # Won't self-heal without user action — auto-disable so it stops re-firing.
+            return await _auto_disable_and_return(
+                subscription, SLACK_PERMISSION_REVOKED_DISABLE_REASON, recipient_results
+            )
+        raise  # Transient Slack errors — let Temporal retry
 
 
 @temporalio.activity.defn

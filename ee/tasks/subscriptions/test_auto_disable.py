@@ -128,7 +128,9 @@ class TestDisableInvalidSubscription(APIBaseTest):
 
         ctx = email_cls.call_args.kwargs["template_context"]
         assert ctx["reason"] == AI_PROMPT_INVALID_DISABLE_REASON.description
-        assert "Edit the subscription with a valid prompt" in ctx["action_message"]
+        assert ctx["action_message"] == AI_PROMPT_INVALID_DISABLE_REASON.user_message.format(
+            target_type=sub.target_type
+        )
 
     def test_disable_persists_when_email_send_fails(self):
         """Disabling is the durable side effect; email is best-effort.

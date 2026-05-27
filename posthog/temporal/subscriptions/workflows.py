@@ -26,18 +26,22 @@ from posthog.temporal.subscriptions.activities import (
     create_export_assets,
     deliver_subscription,
     fetch_due_subscriptions_activity,
+    generate_ai_subscription_report,
     update_delivery_record,
     validate_subscription_for_delivery,
 )
 from posthog.temporal.subscriptions.snapshot_activities import snapshot_subscription_insights
 from posthog.temporal.subscriptions.types import (
+    AI_PROMPT_CONTENT_TYPE,
     CreateDeliveryRecordInputs,
     CreateExportAssetsInputs,
     DeliverSubscriptionInputs,
     DeliverSubscriptionResult,
     DeliveryStatus,
     FetchDueSubscriptionsActivityInputs,
+    GenerateAIReportInputs,
     ProcessSubscriptionWorkflowInputs,
+    RecipientResult,
     ScheduleAllSubscriptionsWorkflowInputs,
     SnapshotInsightsInputs,
     SubscriptionInfo,
@@ -45,6 +49,37 @@ from posthog.temporal.subscriptions.types import (
     TrackedSubscriptionInputs,
     UpdateDeliveryRecordInputs,
 )
+
+# Retry policies for the per-delivery activity lifecycle, shared by both
+# ProcessSubscriptionWorkflow and ProcessAISubscriptionWorkflow. Hoisted to module level
+# so the two workflows can't drift on retry behavior. Plain data constructed at import —
+# determinism-safe for the Temporal workflow sandbox.
+_RECORD_LIFECYCLE_RETRY = temporalio.common.RetryPolicy(
+    initial_interval=dt.timedelta(seconds=5),
+    maximum_interval=dt.timedelta(minutes=1),
+    maximum_attempts=3,
+)
+_VALIDATE_RETRY = temporalio.common.RetryPolicy(
+    initial_interval=dt.timedelta(seconds=5),
+    maximum_interval=dt.timedelta(seconds=30),
+    maximum_attempts=3,
+)
+_DELIVER_RETRY = temporalio.common.RetryPolicy(
+    initial_interval=dt.timedelta(seconds=10),
+    maximum_interval=dt.timedelta(minutes=5),
+    maximum_attempts=5,
+)
+
+
+def _to_recipient_dicts(recipient_results: list[RecipientResult]) -> list[dict]:
+    """Serialize RecipientResult objects to the dict shape `update_delivery_record` persists.
+
+    Shared by both ProcessSubscriptionWorkflow and ProcessAISubscriptionWorkflow.
+    """
+    return [
+        {"recipient": r.recipient, "status": r.status, **({"error": r.error} if r.error else {})}
+        for r in recipient_results
+    ]
 
 
 def _build_outcome_assets(
@@ -106,23 +141,35 @@ class ScheduleAllSubscriptionsWorkflow(PostHogWorkflow):
         # share the same ID, so a still-running child rejects the duplicate start.
         tasks = []
         for sub in subscription_infos:
-            task = temporalio.workflow.execute_child_workflow(
-                ProcessSubscriptionWorkflow.run,
-                TrackedSubscriptionInputs(
-                    subscription_id=sub.subscription_id,
+            tracked = TrackedSubscriptionInputs(
+                subscription_id=sub.subscription_id,
+                team_id=sub.team_id,
+                distinct_id=sub.distinct_id,
+                trigger_type=SubscriptionTriggerType.SCHEDULED,
+                scheduled_at=sub.next_delivery_date,
+                content_type=sub.content_type,
+                slo=SloConfig(
+                    operation=SloOperation.SUBSCRIPTION_DELIVERY,
+                    area=SloArea.ANALYTIC_PLATFORM,
                     team_id=sub.team_id,
+                    resource_id=str(sub.subscription_id),
                     distinct_id=sub.distinct_id,
-                    trigger_type=SubscriptionTriggerType.SCHEDULED,
-                    scheduled_at=sub.next_delivery_date,
-                    slo=SloConfig(
-                        operation=SloOperation.SUBSCRIPTION_DELIVERY,
-                        area=SloArea.ANALYTIC_PLATFORM,
-                        team_id=sub.team_id,
-                        resource_id=str(sub.subscription_id),
-                        distinct_id=sub.distinct_id,
-                    ),
                 ),
-                id=f"process-subscription-{sub.subscription_id}",
+            )
+            # AI-prompt subscriptions run a dedicated workflow (LLM generation + delivery);
+            # everything else runs the insight/dashboard export pipeline. Both share this
+            # scheduler and the underlying activities. Distinct child-ID prefixes keep the
+            # "deterministic ID prevents overlapping duplicates" guarantee per type.
+            if sub.content_type == AI_PROMPT_CONTENT_TYPE:
+                workflow = ProcessAISubscriptionWorkflow.run
+                child_id = f"process-ai-subscription-{sub.subscription_id}"
+            else:
+                workflow = ProcessSubscriptionWorkflow.run
+                child_id = f"process-subscription-{sub.subscription_id}"
+            task = temporalio.workflow.execute_child_workflow(
+                workflow,
+                tracked,
+                id=child_id,
                 parent_close_policy=temporalio.workflow.ParentClosePolicy.ABANDON,
                 execution_timeout=dt.timedelta(hours=2),
             )
@@ -194,11 +241,7 @@ class ProcessSubscriptionWorkflow(PostHogWorkflow):
                     idempotency_key=str(temporalio.workflow.uuid4()),
                 ),
                 start_to_close_timeout=dt.timedelta(minutes=2),
-                retry_policy=temporalio.common.RetryPolicy(
-                    initial_interval=dt.timedelta(seconds=5),
-                    maximum_interval=dt.timedelta(minutes=1),
-                    maximum_attempts=3,
-                ),
+                retry_policy=_RECORD_LIFECYCLE_RETRY,
             )
 
             # Validate up-front: if the subscription is already disabled or its target
@@ -208,11 +251,7 @@ class ProcessSubscriptionWorkflow(PostHogWorkflow):
                 validate_subscription_for_delivery,
                 inputs.subscription_id,
                 start_to_close_timeout=dt.timedelta(minutes=1),
-                retry_policy=temporalio.common.RetryPolicy(
-                    initial_interval=dt.timedelta(seconds=5),
-                    maximum_interval=dt.timedelta(seconds=30),
-                    maximum_attempts=3,
-                ),
+                retry_policy=_VALIDATE_RETRY,
             )
             if abort_info is not None:
                 # Just-disabled → FAILED with reason. Already-disabled (no failed_recipient) → SKIPPED default.
@@ -240,48 +279,11 @@ class ProcessSubscriptionWorkflow(PostHogWorkflow):
                 ),
             )
 
-            if not prepare_result.exported_asset_ids and not prepare_result.is_ai_prompt:
+            if not prepare_result.exported_asset_ids:
                 # No assets to export — SKIPPED status, finalized in finally
                 return
 
             delivery_exported_asset_ids = prepare_result.exported_asset_ids
-
-            # AI prompt subscriptions skip the per-insight export + snapshot phases;
-            # the LLM output is the report.
-            if prepare_result.is_ai_prompt:
-                is_new = inputs.trigger_type == SubscriptionTriggerType.TARGET_CHANGE
-                deliver_result = await temporalio.workflow.execute_activity(
-                    deliver_subscription,
-                    DeliverSubscriptionInputs(
-                        subscription_id=inputs.subscription_id,
-                        exported_asset_ids=[],
-                        total_insight_count=0,
-                        is_new_subscription_target=is_new,
-                        previous_value=inputs.previous_value,
-                        invite_message=inputs.invite_message,
-                        change_summary=None,
-                        # Pass the delivery_id so the activity can cache its generated
-                        # markdown across retries and avoid re-billing the planner +
-                        # synthesis LLM calls on a transient send-side failure.
-                        delivery_id=delivery_id,
-                    ),
-                    start_to_close_timeout=dt.timedelta(minutes=10),
-                    retry_policy=temporalio.common.RetryPolicy(
-                        initial_interval=dt.timedelta(seconds=30),
-                        maximum_interval=dt.timedelta(minutes=5),
-                        maximum_attempts=3,
-                    ),
-                )
-                delivery_recipient_results = [
-                    {
-                        "recipient": r.recipient,
-                        "status": r.status,
-                        **({"error": r.error} if r.error else {}),
-                    }
-                    for r in deliver_result.recipient_results
-                ]
-                final_status = DeliveryStatus.COMPLETED
-                return
 
             # Phase 2: Fan-out export — one activity per insight, independent retry
             export_tasks = []
@@ -364,22 +366,11 @@ class ProcessSubscriptionWorkflow(PostHogWorkflow):
                     change_summary=change_summary,
                 ),
                 start_to_close_timeout=dt.timedelta(minutes=5),
-                retry_policy=temporalio.common.RetryPolicy(
-                    initial_interval=dt.timedelta(seconds=10),
-                    maximum_interval=dt.timedelta(minutes=5),
-                    maximum_attempts=5,
-                ),
+                retry_policy=_DELIVER_RETRY,
             )
 
             # Capture per-recipient results for the delivery record
-            delivery_recipient_results = [
-                {
-                    "recipient": r.recipient,
-                    "status": r.status,
-                    **({"error": r.error} if r.error else {}),
-                }
-                for r in deliver_result.recipient_results
-            ]
+            delivery_recipient_results = _to_recipient_dicts(deliver_result.recipient_results)
             final_status = DeliveryStatus.COMPLETED
 
         except Exception as e:
@@ -413,11 +404,7 @@ class ProcessSubscriptionWorkflow(PostHogWorkflow):
                             finished=True,
                         ),
                         start_to_close_timeout=dt.timedelta(minutes=2),
-                        retry_policy=temporalio.common.RetryPolicy(
-                            initial_interval=dt.timedelta(seconds=5),
-                            maximum_interval=dt.timedelta(minutes=1),
-                            maximum_attempts=3,
-                        ),
+                        retry_policy=_RECORD_LIFECYCLE_RETRY,
                     )
                 except Exception:
                     temporalio.workflow.logger.exception(
@@ -434,11 +421,7 @@ class ProcessSubscriptionWorkflow(PostHogWorkflow):
                     advance_next_delivery_date,
                     inputs.subscription_id,
                     start_to_close_timeout=dt.timedelta(minutes=2),
-                    retry_policy=temporalio.common.RetryPolicy(
-                        initial_interval=dt.timedelta(seconds=5),
-                        maximum_interval=dt.timedelta(minutes=1),
-                        maximum_attempts=3,
-                    ),
+                    retry_policy=_RECORD_LIFECYCLE_RETRY,
                 )
 
             # Enrich SLO event with per-insight detail (non-user errors only).
@@ -462,6 +445,167 @@ class ProcessSubscriptionWorkflow(PostHogWorkflow):
             raise caught_error
 
 
+@temporalio.workflow.defn(name="process-ai-subscription")
+class ProcessAISubscriptionWorkflow(PostHogWorkflow):
+    """Scheduled delivery for AI-prompt subscriptions.
+
+    Separate from ProcessSubscriptionWorkflow because AI subs have no insights to export —
+    the report is produced by an LLM. The shape is: create-record -> validate -> generate
+    (LLM, persisted to the delivery row by reference) -> deliver (ships the persisted
+    report). Reuses the same activities and is dispatched by the same scheduler.
+
+    The create-record / validate / finally (finalize + advance schedule) scaffolding is
+    deliberately parallel to ProcessSubscriptionWorkflow — the only real difference is the
+    middle phase (LLM generate vs insight export). Keep the two in sync: a change to the
+    delivery-record lifecycle, retry policies, or the advance-schedule guard here almost
+    certainly applies there too. (Not extracted into a shared base because Temporal
+    workflow classes can't share run-method control flow without sandbox-determinism risk.)
+    """
+
+    @staticmethod
+    def parse_inputs(inputs: list[str]) -> TrackedSubscriptionInputs:
+        loaded = json.loads(inputs[0])
+        return TrackedSubscriptionInputs(**loaded)
+
+    @temporalio.workflow.run
+    async def run(self, inputs: TrackedSubscriptionInputs) -> None:
+        delivery_id: uuid.UUID | None = None
+        final_status = DeliveryStatus.SKIPPED
+        delivery_recipient_results: list[dict] = []
+        caught_error: BaseException | None = None
+
+        try:
+            delivery_id = await temporalio.workflow.execute_activity(
+                create_delivery_record,
+                CreateDeliveryRecordInputs(
+                    subscription_id=inputs.subscription_id,
+                    team_id=inputs.team_id,
+                    trigger_type=inputs.trigger_type,
+                    scheduled_at=inputs.scheduled_at,
+                    temporal_workflow_id=temporalio.workflow.info().workflow_id,
+                    idempotency_key=str(temporalio.workflow.uuid4()),
+                ),
+                start_to_close_timeout=dt.timedelta(minutes=2),
+                retry_policy=_RECORD_LIFECYCLE_RETRY,
+            )
+
+            # Up-front validation: already-disabled (idempotency redispatch) or a
+            # permanently broken target (e.g. unsupported target_type) auto-disables and
+            # short-circuits before any LLM cost.
+            abort_info = await temporalio.workflow.execute_activity(
+                validate_subscription_for_delivery,
+                inputs.subscription_id,
+                start_to_close_timeout=dt.timedelta(minutes=1),
+                retry_policy=_VALIDATE_RETRY,
+            )
+            if abort_info is not None:
+                # Just-disabled → FAILED with reason. Already-disabled (no failed_recipient)
+                # → SKIPPED default (idempotency redispatch). Matches ProcessSubscriptionWorkflow.
+                if abort_info.failed_recipient is not None:
+                    delivery_recipient_results = [dataclasses.asdict(abort_info.failed_recipient)]
+                    final_status = DeliveryStatus.FAILED
+                return
+
+            # Phase 1: generate the report. Consent is gated inside, before any LLM cost.
+            # The markdown is persisted onto the delivery row (read back by delivery),
+            # never returned on the wire — it can exceed Temporal's ~2 MiB payload cap.
+            generate_result = await temporalio.workflow.execute_activity(
+                generate_ai_subscription_report,
+                GenerateAIReportInputs(subscription_id=inputs.subscription_id, delivery_id=delivery_id),
+                start_to_close_timeout=dt.timedelta(minutes=10),
+                retry_policy=temporalio.common.RetryPolicy(
+                    initial_interval=dt.timedelta(seconds=30),
+                    maximum_interval=dt.timedelta(minutes=5),
+                    maximum_attempts=3,
+                ),
+            )
+            if generate_result.aborted:
+                # Consent revoked or prompt invalid — generation already auto-disabled.
+                delivery_recipient_results = _to_recipient_dicts(generate_result.recipient_results)
+                final_status = DeliveryStatus.FAILED
+                return
+
+            # Phase 2: ship the persisted report. is_new only for target-change triggers.
+            is_new = inputs.trigger_type == SubscriptionTriggerType.TARGET_CHANGE
+            deliver_result = await temporalio.workflow.execute_activity(
+                deliver_subscription,
+                DeliverSubscriptionInputs(
+                    subscription_id=inputs.subscription_id,
+                    exported_asset_ids=[],
+                    total_insight_count=0,
+                    is_new_subscription_target=is_new,
+                    previous_value=inputs.previous_value,
+                    invite_message=inputs.invite_message,
+                    delivery_id=delivery_id,
+                ),
+                start_to_close_timeout=dt.timedelta(minutes=5),
+                retry_policy=_DELIVER_RETRY,
+            )
+            delivery_recipient_results = _to_recipient_dicts(deliver_result.recipient_results)
+            final_status = DeliveryStatus.COMPLETED
+
+        except Exception as e:
+            # Preserve recipient outcomes carried in non-retryable delivery errors so the
+            # delivery history isn't empty on failure (matches ProcessSubscriptionWorkflow).
+            if isinstance(e, ActivityError) and isinstance(e.cause, ApplicationError):
+                details = e.cause.details
+                if details and isinstance(details[0], dict):
+                    recipient_results = details[0].get("recipient_results")
+                    if isinstance(recipient_results, list):
+                        delivery_recipient_results = recipient_results
+            caught_error = e
+            final_status = DeliveryStatus.FAILED
+
+        finally:
+            if delivery_id is not None:
+                try:
+                    await temporalio.workflow.execute_activity(
+                        update_delivery_record,
+                        UpdateDeliveryRecordInputs(
+                            delivery_id=delivery_id,
+                            status=final_status,
+                            recipient_results=delivery_recipient_results or None,
+                            error={"message": str(caught_error)[:500], "type": type(caught_error).__name__}
+                            if caught_error
+                            else None,
+                            finished=True,
+                        ),
+                        start_to_close_timeout=dt.timedelta(minutes=2),
+                        retry_policy=_RECORD_LIFECYCLE_RETRY,
+                    )
+                except Exception:
+                    temporalio.workflow.logger.exception(
+                        "update_delivery_record failed (delivery history is best-effort when a prior error exists)"
+                    )
+                    if caught_error is None:
+                        raise
+
+            # Advance schedule for scheduled deliveries even on failure — the activity
+            # no-ops when the subscription is disabled, so a just-auto-disabled sub
+            # doesn't get a misleading future delivery date.
+            if inputs.trigger_type == SubscriptionTriggerType.SCHEDULED:
+                await temporalio.workflow.execute_activity(
+                    advance_next_delivery_date,
+                    inputs.subscription_id,
+                    start_to_close_timeout=dt.timedelta(minutes=2),
+                    retry_policy=_RECORD_LIFECYCLE_RETRY,
+                )
+
+            # Auto-disable aborts (consent revoked / prompt invalid) return normally rather
+            # than raising, so they record delivery status FAILED but keep the SLO outcome
+            # SUCCESS — a user-config terminal state is not a platform failure (matches the
+            # non-AI auto-disable convention). Genuine errors set caught_error and re-raise
+            # below; SloInterceptor maps the exception to a FAILURE outcome, same as
+            # ProcessSubscriptionWorkflow, so we don't set the outcome here.
+            if inputs.slo:
+                inputs.slo.completion_properties.setdefault("content_type", AI_PROMPT_CONTENT_TYPE)
+
+        # Re-raise after cleanup completes — Temporal blocks activity scheduling in the
+        # finally block while an exception is propagating.
+        if caught_error:
+            raise caught_error
+
+
 @temporalio.workflow.defn(name="handle-subscription-value-change")
 class HandleSubscriptionValueChangeWorkflow(PostHogWorkflow):
     @staticmethod
@@ -478,6 +622,7 @@ class HandleSubscriptionValueChangeWorkflow(PostHogWorkflow):
             previous_value=inputs.previous_value,
             invite_message=inputs.invite_message,
             trigger_type=inputs.trigger_type,
+            content_type=inputs.content_type,
             slo=SloConfig(
                 operation=SloOperation.SUBSCRIPTION_DELIVERY,
                 area=SloArea.ANALYTIC_PLATFORM,
@@ -486,9 +631,16 @@ class HandleSubscriptionValueChangeWorkflow(PostHogWorkflow):
                 distinct_id=inputs.distinct_id,
             ),
         )
-        child_id = f"process-subscription-{inputs.trigger_type}-{inputs.subscription_id}"
+        # Route AI-prompt subs (test delivery / target change) to the AI workflow, same
+        # as the scheduler fan-out.
+        if inputs.content_type == AI_PROMPT_CONTENT_TYPE:
+            child_workflow = ProcessAISubscriptionWorkflow.run
+            child_id = f"process-ai-subscription-{inputs.trigger_type}-{inputs.subscription_id}"
+        else:
+            child_workflow = ProcessSubscriptionWorkflow.run
+            child_id = f"process-subscription-{inputs.trigger_type}-{inputs.subscription_id}"
         await temporalio.workflow.execute_child_workflow(
-            ProcessSubscriptionWorkflow.run,
+            child_workflow,
             tracked,
             id=child_id,
             parent_close_policy=temporalio.workflow.ParentClosePolicy.ABANDON,

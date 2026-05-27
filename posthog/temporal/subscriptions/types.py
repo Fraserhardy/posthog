@@ -20,6 +20,11 @@ class DeliveryStatus:
     SKIPPED = "skipped"
 
 
+# Mirrors Subscription.ContentType.AI_PROMPT — a plain constant so the Temporal
+# workflow sandbox can route by content type without importing the Django model.
+AI_PROMPT_CONTENT_TYPE = "ai_prompt"
+
+
 class SubscriptionTriggerType:
     """How a subscription delivery was triggered.
 
@@ -38,6 +43,9 @@ class SubscriptionInfo:
     team_id: int
     distinct_id: str
     next_delivery_date: typing.Optional[str] = None
+    # Lets the scheduler fan out AI-prompt subscriptions to ProcessAISubscriptionWorkflow
+    # and everything else to ProcessSubscriptionWorkflow.
+    content_type: str = ""
 
 
 @dataclasses.dataclass
@@ -77,17 +85,6 @@ class CreateExportAssetsResult:
     team_id: int = 0
     distinct_id: str = ""
     target_type: str = ""
-    # Set by `create_export_assets` for AI subscriptions, which have no insights
-    # to export. The workflow uses this to skip Phase 2 (export) + Phase 2.5
-    # (snapshot) and go straight to `deliver_subscription`, instead of the
-    # default empty-assets SKIPPED short-circuit.
-    is_ai_prompt: bool = False
-    # Deprecated (TODO slug: subscriptions-patched-cleanup) — kept only so
-    # that in-flight Temporal workflows (whose history contains an old-format
-    # result) still deserialize on new workers during a rolling deploy. New
-    # code does not populate this field. Remove in the second cleanup PR per
-    # the sequence in workflows.py.
-    insight_snapshots: typing.Optional[list[dict[str, typing.Any]]] = None
 
 
 @dataclasses.dataclass
@@ -99,12 +96,11 @@ class DeliverSubscriptionInputs:
     previous_value: typing.Optional[str] = None
     invite_message: typing.Optional[str] = None
     change_summary: typing.Optional[str] = None
-    # AI subscriptions only: the SubscriptionDelivery row that caches the
-    # generated markdown across activity retries. None for non-AI deliveries
-    # and for standalone callers (tests, management commands) that bypass the
-    # full workflow. When set, `_deliver_ai_subscription` short-circuits the
-    # planner + HogQL + synthesis pipeline on retry if the markdown is already
-    # persisted, so a transient send-side failure doesn't re-bill LLM tokens.
+    # AI subscriptions only: the SubscriptionDelivery row the upstream
+    # `generate_ai_subscription_report` activity wrote the report markdown onto.
+    # Delivery reads the report back from this row rather than receiving it on
+    # the wire (the markdown can exceed Temporal's ~2 MiB payload cap). None for
+    # non-AI deliveries.
     delivery_id: typing.Optional[uuid.UUID] = None
 
 
@@ -117,6 +113,9 @@ class ProcessSubscriptionWorkflowInputs:
     invite_message: typing.Optional[str] = None
     trigger_type: str = SubscriptionTriggerType.TARGET_CHANGE
     scheduled_at: typing.Optional[str] = None
+    # Lets HandleSubscriptionValueChangeWorkflow route AI-prompt subs to
+    # ProcessAISubscriptionWorkflow. Passed by the API from the loaded instance.
+    content_type: str = ""
 
 
 @dataclasses.dataclass
@@ -137,6 +136,7 @@ class TrackedSubscriptionInputs:
     slo: SloConfig | None = None
     trigger_type: str = SubscriptionTriggerType.TARGET_CHANGE
     scheduled_at: typing.Optional[str] = None
+    content_type: str = ""
 
 
 RecipientResultStatus = typing.Literal["success", "failed", "partial"]
@@ -151,6 +151,24 @@ class RecipientResult:
 
 @dataclasses.dataclass
 class DeliverSubscriptionResult:
+    recipient_results: list[RecipientResult] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass
+class GenerateAIReportInputs:
+    subscription_id: int
+    # The report markdown is written onto this SubscriptionDelivery row rather than
+    # returned on the wire — it can exceed Temporal's ~2 MiB payload cap.
+    delivery_id: uuid.UUID
+
+
+@dataclasses.dataclass
+class GenerateAIReportResult:
+    """Outcome of the generation phase. `aborted` signals a terminal pre-delivery
+    failure (consent revoked, prompt invalid) that already auto-disabled the
+    subscription; the workflow records `recipient_results` as FAILED and skips delivery."""
+
+    aborted: bool = False
     recipient_results: list[RecipientResult] = dataclasses.field(default_factory=list)
 
 

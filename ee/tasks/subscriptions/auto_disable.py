@@ -137,8 +137,6 @@ def send_notifications_for_disabled_subscription(
             "subscription_url": subscription.url,
             "subscription_title": display_name,
             "reason": reason.description,
-            # The re-enable guidance doubles as the "what to do next" line in the email —
-            # `{target_type}` is interpolated for the channel-specific reasons.
             "action_message": reason.user_message.format(target_type=subscription.target_type),
         },
     )
