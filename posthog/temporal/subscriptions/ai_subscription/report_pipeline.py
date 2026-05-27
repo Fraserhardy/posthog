@@ -14,7 +14,13 @@ from posthog.exceptions_capture import capture_exception
 from posthog.models import Team, User
 from posthog.ph_client import ph_scoped_capture
 from posthog.sync import database_sync_to_async
-from posthog.temporal.subscriptions.ai_subscription.prompts import AI_SUBSCRIPTION_SYNTHESIS_PROMPT, HOGQL_FIX_PROMPT
+from posthog.temporal.subscriptions.ai_subscription.prompts import (
+    AI_SUBSCRIPTION_SYNTHESIS_PROMPT,
+    HOGQL_FIX_PROMPT,
+    HOGQL_FIX_PROMPT_NAME,
+    SYNTHESIS_PROMPT_NAME,
+    resolve_prompt,
+)
 from posthog.temporal.subscriptions.ai_subscription.schemas import EnrichedPromptSpec, HogQLFix, QueryPlanStep
 from posthog.temporal.subscriptions.ai_subscription.spec_generator import (
     DEFAULT_PLANNER_MODEL,
@@ -129,19 +135,19 @@ async def _synthesize(
 
     chat = MaxChatOpenAI(
         model=DEFAULT_SYNTHESIS_MODEL,
-        temperature=0.2,
         timeout=_SYNTHESIS_LLM_TIMEOUT_SECONDS,
         user=user,
         team=team,
         billable=True,
         posthog_properties=posthog_properties,
     )
+    synthesis_prompt = resolve_prompt(team, SYNTHESIS_PROMPT_NAME, AI_SUBSCRIPTION_SYNTHESIS_PROMPT)
 
     try:
         # database_sync_to_async (not to_thread): MaxChatOpenAI reads billing/quota from the ORM
         result = await database_sync_to_async(chat.invoke, thread_sensitive=False)(
             [
-                ("system", AI_SUBSCRIPTION_SYNTHESIS_PROMPT),
+                ("system", synthesis_prompt),
                 ("human", _compose_synthesis_human_message(spec, rendered_results)),
             ],
         )
@@ -249,7 +255,6 @@ async def _arequest_hogql_fix(
 
     llm = MaxChatOpenAI(
         model=DEFAULT_PLANNER_MODEL,
-        temperature=0,
         timeout=_FIX_LLM_TIMEOUT_SECONDS,
         user=user,
         team=team,
@@ -262,10 +267,11 @@ async def _arequest_hogql_fix(
         "error": error_message,
         "original_hogql": original_hogql,
     }
+    fix_prompt = resolve_prompt(team, HOGQL_FIX_PROMPT_NAME, HOGQL_FIX_PROMPT)
     rendered = re.sub(
         r"\{\{\{(\w+)\}\}\}",
         lambda m: substitutions.get(m.group(1), m.group(0)),
-        HOGQL_FIX_PROMPT,
+        fix_prompt,
     )
 
     try:

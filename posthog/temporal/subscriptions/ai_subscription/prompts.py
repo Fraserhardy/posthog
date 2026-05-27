@@ -1,3 +1,31 @@
+import structlog
+
+from posthog.models import Team
+from posthog.storage.llm_prompt_cache import get_prompt_by_name_from_cache
+
+logger = structlog.get_logger(__name__)
+
+# LLMPrompt names teams can author in the Prompt product to override the defaults below.
+PLANNER_PROMPT_NAME = "ai_subscription_planner"
+SYNTHESIS_PROMPT_NAME = "ai_subscription_synthesis"
+HOGQL_FIX_PROMPT_NAME = "ai_subscription_hogql_fix"
+
+
+def resolve_prompt(team: Team, name: str, default: str) -> str:
+    # LLMPrompt is team-scoped with no global tier, so the code constant is the default and a
+    # team-authored prompt of the same name overrides it. Falls back to the default on any miss.
+    try:
+        cached = get_prompt_by_name_from_cache(team, name)
+    except Exception:
+        logger.warning("ai_subscription.prompt_lookup_failed", team_id=team.id, prompt_name=name, exc_info=True)
+        return default
+    if cached is not None:
+        stored = cached.get("prompt")
+        if isinstance(stored, str) and stored.strip():
+            return stored
+    return default
+
+
 PLAN_GENERATION_PROMPT = """
 You are PostHog's report planner. Given a short user prompt and project context, output a structured
 plan of 1 to 3 HogQL queries that, when executed and summarized together, answer the prompt.

@@ -12,7 +12,11 @@ from posthog.hogql_queries.ai.team_taxonomy_query_runner import TeamTaxonomyQuer
 from posthog.hogql_queries.query_runner import ExecutionMode
 from posthog.models import EventDefinition, PropertyDefinition, Team, User
 from posthog.models.group_type_mapping import get_group_types_for_project
-from posthog.temporal.subscriptions.ai_subscription.prompts import PLAN_GENERATION_PROMPT
+from posthog.temporal.subscriptions.ai_subscription.prompts import (
+    PLAN_GENERATION_PROMPT,
+    PLANNER_PROMPT_NAME,
+    resolve_prompt,
+)
 from posthog.temporal.subscriptions.ai_subscription.schemas import EnrichedPromptSpec, QueryPlan
 from posthog.text_sanitization import sanitize_user_text
 
@@ -28,8 +32,9 @@ NO_DATA_EVENT_NAMES_LIMIT = 25
 PERSON_PROPERTY_NAMES_LIMIT = 30
 EVENT_NAME_MAX_LENGTH = 120
 
-DEFAULT_PLANNER_MODEL = "gpt-4.1-mini"
-DEFAULT_SYNTHESIS_MODEL = "gpt-4.1-mini"
+# gpt-5 models only support the default temperature (1), so callers omit the temperature arg
+DEFAULT_PLANNER_MODEL = "gpt-5-mini"
+DEFAULT_SYNTHESIS_MODEL = "gpt-5-mini"
 _PLANNER_LLM_TIMEOUT_SECONDS = 90.0
 
 
@@ -162,24 +167,19 @@ def generate_query_plan(
         posthog_properties["subscription_id"] = trace_correlation_id
     llm = MaxChatOpenAI(
         model=DEFAULT_PLANNER_MODEL,
-        temperature=0,
         timeout=_PLANNER_LLM_TIMEOUT_SECONDS,
         user=user,
         team=team,
-        # Planner LLM spend is billable — AI subscription usage counts against the
-        # team's AI credits.
         billable=True,
         posthog_properties=posthog_properties,
     ).with_structured_output(QueryPlan, method="json_schema", include_raw=False)
 
-    # Single-pass substitution: chained .replace() is order-dependent — if the first
-    # substitution's value contained `{{{cleaned_prompt}}}` literally (e.g. an event
-    # name in `context_blob`), the second .replace() would expand it again.
+    # single-pass substitution so a value containing {{{...}}} can't be re-expanded
     substitutions = {"context_blob": context_blob, "cleaned_prompt": cleaned_prompt}
     rendered_prompt = re.sub(
         r"\{\{\{(\w+)\}\}\}",
         lambda m: substitutions.get(m.group(1), m.group(0)),
-        PLAN_GENERATION_PROMPT,
+        resolve_prompt(team, PLANNER_PROMPT_NAME, PLAN_GENERATION_PROMPT),
     )
 
     result = llm.invoke([("system", rendered_prompt)])
