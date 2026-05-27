@@ -12,7 +12,6 @@ from posthog.hogql_queries.ai.team_taxonomy_query_runner import TeamTaxonomyQuer
 from posthog.hogql_queries.query_runner import ExecutionMode
 from posthog.models import EventDefinition, PropertyDefinition, Team, User
 from posthog.models.group_type_mapping import get_group_types_for_project
-from posthog.models.subscription import Subscription
 from posthog.text_sanitization import sanitize_user_text
 
 from ee.hogai.llm import MaxChatOpenAI
@@ -45,15 +44,6 @@ _PLANNER_LLM_TIMEOUT_SECONDS = 90.0
 # `<system>`-style markers; layering ad-hoc patterns on top just creates false positives
 # for legitimate phrasings like "ignore null values".
 
-_FREQUENCY_WINDOW_DAYS = {
-    Subscription.SubscriptionFrequency.DAILY: 1,
-    Subscription.SubscriptionFrequency.WEEKLY: 7,
-    Subscription.SubscriptionFrequency.MONTHLY: 30,
-    Subscription.SubscriptionFrequency.YEARLY: 365,
-}
-
-DEFAULT_AD_HOC_WINDOW_DAYS = 7
-
 
 class PromptRejectedError(ValueError):
     pass
@@ -73,11 +63,6 @@ def sanitize_prompt(raw: str | None) -> str:
         raise PromptRejectedError("Prompt is empty.")
 
     return cleaned
-
-
-def frequency_to_window_days(frequency: str) -> int:
-    """Map a subscription frequency to the analysis window the LLM should consider."""
-    return _FREQUENCY_WINDOW_DAYS.get(frequency, DEFAULT_AD_HOC_WINDOW_DAYS)
 
 
 def _top_event_names(team: Team, limit: int) -> list[str]:

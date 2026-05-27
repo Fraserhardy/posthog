@@ -10,7 +10,7 @@ from posthog.sync import database_sync_to_async
 from posthog.utils import absolute_uri
 
 from ee.tasks.subscriptions.ai_subscription.report_pipeline import generate_ai_report
-from ee.tasks.subscriptions.ai_subscription.spec_generator import PromptRejectedError, frequency_to_window_days
+from ee.tasks.subscriptions.ai_subscription.spec_generator import PromptRejectedError
 from ee.tasks.subscriptions.slack_subscriptions import (
     UTM_TAGS_BASE,
     SlackDeliveryResult,
@@ -99,7 +99,7 @@ async def generate_ai_subscription_markdown(subscription: Subscription) -> str:
         team=subscription.team,
         user=subscription.created_by,
         prompt=subscription.prompt,
-        window_days=frequency_to_window_days(subscription.frequency),
+        window_days=subscription.ai_report_window_days,
         trace_correlation_id=subscription.id,
     )
 
