@@ -1,0 +1,16 @@
+# LiteLLM — choice unwrapping.
+#
+# A LiteLLM choice (`{finish_reason, index, message}`) wraps a real provider
+# message. We delegate `.message` back through the pipeline; whatever
+# provider recipe matches the inner message handles it from there.
+
+id: litellm
+kind: chat
+priority: 10
+
+rules:
+    - on:
+          finish_reason: { exists: true }
+          index: { exists: true }
+          message: { is: object }
+      delegate: $.message

@@ -1,0 +1,62 @@
+# OTel parts format (OpenTelemetry AI semantic conventions).
+#
+# Messages look like `{role, parts: [...]}` where each part is one of:
+#   - { type: text, content: "..." }            → text content
+#   - { type: tool_call, id, name, arguments }  → assistant tool call
+#   - { type: tool_call_response, id, result }  → emitted as a SEPARATE
+#                                                 follow-up tool message
+#
+# The aggregation falls out of slot semantics:
+#   - text parts pluck to an array of strings; the content slot collapses
+#     0 → undefined (drop), 1 → string, n → [{type:text, text:str}, ...]
+#   - tool_call parts project into the canonical OpenAI tool-call shape
+#   - tool_call_response parts each spawn their own follow-up message
+#
+# When all three buckets are empty for a given message, the empty-drop
+# rule kicks in for the primary because followups produced nothing too —
+# legacy returns `[{role, content: ''}]` in that case. Our slot's "[] →
+# undefined" only drops the primary when followups exist, so the empty-
+# parts case still emits a single empty content message. ✓
+
+id: otel
+kind: chat
+priority: 60
+
+rules:
+    - on:
+          role: { is: string }
+          parts: { is: array }
+      emit:
+          # Spread everything except `role` and `parts` so top-level
+          # metadata (e.g. `finish_reason`) survives.
+          spread:
+              omit:
+                  from: $
+                  keys: [role, parts]
+          # 0 text parts → `~` (drop the primary via the empty-drop rule,
+          # which fires because followups are present).
+          # 1 text part → the slot collapses ['hi'] to 'hi'.
+          # n text parts → the slot wraps each as a {type:text, text:...} part.
+          content:
+              select:
+                  from: $.parts
+                  where: { type: text }
+                  pluck: content
+                  if_empty: ~
+          toolCalls:
+              select:
+                  from: $.parts
+                  where: { type: tool_call }
+                  pluck:
+                      id: $.id
+                      name: $.name
+                      args: $.arguments
+      followups:
+          - from:
+                select:
+                    from: $.parts
+                    where: { type: tool_call_response }
+            each:
+                role: tool
+                toolCallId: $.id
+                content: $.result

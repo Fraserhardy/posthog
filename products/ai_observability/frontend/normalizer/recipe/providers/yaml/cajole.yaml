@@ -1,0 +1,32 @@
+# Last-resort salvage.
+#
+# When no provider matches, the legacy `normalizeMessage` tries one of three
+# things in order:
+#   - bare string → use it as content
+#   - object with a string `.content` field → use that
+#   - else → JSON.stringify the whole input and use it as content
+#
+# Also fires a `posthog.capture('llma message normalization failed', ...)`
+# so we can spot brand-new shapes in production. We mirror both behaviors
+# below — the `capture:` at the provider level handles the telemetry, the
+# three rules cover the three shapes in order.
+
+id: cajole
+kind: chat
+priority: 1000
+capture: llma message normalization failed
+
+rules:
+    # An object that has a `.content` string but didn't match any of the
+    # structured providers — pluck out the string and use it as content.
+    - on:
+          content: { is: string }
+      emit:
+          content: $.content
+
+    # Truly unrecognized shape — fall back to JSON-stringifying the whole
+    # payload (the content coercer's default for non-string values).
+    - on:
+          $: { exists: true }
+      emit:
+          content: $

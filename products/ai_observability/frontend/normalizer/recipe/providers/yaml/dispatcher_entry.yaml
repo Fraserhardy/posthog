@@ -1,0 +1,37 @@
+# Entry-level unwrap rules.
+#
+# These are the shapes that used to be handled in code at the top of
+# `normalizeMessages`: an array of messages, a `{choices: [...]}` response
+# envelope, or a bare string. Each unwraps into the rule pipeline, which
+# then dispatches the inner items through the rest of the providers.
+#
+# Priority is the lowest non-zero number so these always run first. The
+# only thing `normalizeMessages` still does in code is inject the synthetic
+# "available tools" message (because `tools` is a separate parameter, not
+# a message shape).
+
+id: dispatcher_entry
+kind: chat
+priority: 1
+
+rules:
+    # Array of messages — flatten each through dispatch.
+    - on:
+          $: { is: array }
+      delegateEach: $
+
+    # Permissive `{choices: [...]}` envelope. Distinct from `litellm.yaml`,
+    # which catches an individual choice via `finish_reason` / `index`. This
+    # rule catches the *response* shape: a bare object whose only structural
+    # marker is the `choices` array.
+    - on:
+          choices: { is: array }
+      delegateEach: $.choices
+
+    # Bare string at the entry point — wrap it as a single message. The
+    # role comes from the matcher's `$role` resolution (which falls back to
+    # `defaultRole` since strings have neither `.role` nor `.type`).
+    - on:
+          $: { is: string }
+      emit:
+          content: $

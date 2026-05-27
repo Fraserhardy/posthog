@@ -1,0 +1,22 @@
+# OpenAI Chat-compatible messages.
+#
+# Canonical `{role, content: string|null, tool_calls?, tool_call_id?}`
+# shape. We spread the original payload (`spread: $`) so unknown kwargs
+# pass through, then explicitly set the four typed slots. Content gets
+# the `try_parse_structured_content` heuristic — strings that LOOK like
+# a typed-block JSON array get re-parsed.
+
+id: openai_chat
+kind: chat
+priority: 35
+
+rules:
+    - on:
+          role: { exists: true }
+          content: { is: [string, null] }
+      emit:
+          spread: $
+          content:
+              try_parse_structured_content: $.content
+          toolCalls: $.tool_calls
+          toolCallId: $.tool_call_id

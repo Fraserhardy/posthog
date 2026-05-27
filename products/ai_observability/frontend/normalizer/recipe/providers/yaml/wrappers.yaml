@@ -1,0 +1,39 @@
+# Single-field content wrappers.
+#
+# Many clients ship `{content: "..."}` / `{message: "..."}` / `{text: "..."}`
+# with no role and no type. The legacy normalizer falls into the cajole
+# branch for the first and stringifies the other two — both lose the actual
+# text. These rules catch each shape explicitly and treat them as a user
+# message.
+
+id: wrappers
+kind: chat
+priority: 90
+
+rules:
+    - on:
+          role: { exists: false }
+          type: { exists: false }
+          content: { is: string }
+      emit:
+          role: user
+          content: $.content
+
+    - on:
+          role: { exists: false }
+          type: { exists: false }
+          content: { exists: false }
+          message: { is: string }
+      emit:
+          role: user
+          content: $.message
+
+    - on:
+          role: { exists: false }
+          type: { exists: false }
+          content: { exists: false }
+          message: { exists: false }
+          text: { is: string }
+      emit:
+          role: user
+          content: $.text

@@ -1,0 +1,20 @@
+# LangChain / LangGraph — bare type-based message.
+#
+# LangChain uses `type` (human / ai / tool / system / context) instead of
+# `role`, and carries text in `.content` (string or arbitrary object).
+# Content that isn't a string round-trips through JSON.stringify in the
+# coercer's content slot.
+
+id: langchain
+kind: chat
+priority: 20
+
+rules:
+    - on:
+          role: { exists: false }
+          type: { in: [human, ai, tool, system, context] }
+          content: { exists: true }
+      emit:
+          content: $.content
+          toolCalls: $.tool_calls
+          toolCallId: $.tool_call_id

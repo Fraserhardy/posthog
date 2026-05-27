@@ -1,0 +1,65 @@
+# Vercel AI SDK — flat type-discriminated content blocks plus tool calls.
+
+id: vercel_sdk
+kind: chat
+priority: 30
+
+rules:
+    # text block
+    - on:
+          type: text
+          content: { is: string }
+      emit:
+          content: $.content
+
+    # input_text
+    - on:
+          type: input_text
+          text: { is: string }
+      emit:
+          content: $.text
+
+    # input_image
+    - on:
+          type: input_image
+          image_url: { is: string }
+      emit:
+          content:
+              - image: $.image_url
+
+    # tool-call, function variant
+    - on:
+          type: tool-call
+          id: { exists: true }
+          function:
+              name: { is: string }
+      emit:
+          content: ''
+          toolCall:
+              id: $.id
+              name: $.function.name
+              args: $.function.arguments
+
+    # tool-call, toolName variant — only fires when `function` is absent
+    - on:
+          type: tool-call
+          toolName: { is: string }
+          function: { exists: false }
+      emit:
+          content: ''
+          toolCall:
+              id: $.toolCallId
+              name: $.toolName
+              args:
+                  coalesce:
+                      - $.input
+                      - {}
+
+    # tool-result
+    - on:
+          type: tool-result
+          toolName: { is: string }
+      emit:
+          role: tool_result
+          content: $.output
+          toolCallId: $.toolCallId

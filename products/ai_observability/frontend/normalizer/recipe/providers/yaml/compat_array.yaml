@@ -1,0 +1,49 @@
+# Cross-SDK typed-block content array.
+#
+# Many SDKs (OpenAI Responses, unified format, post-processed Anthropic)
+# ship `{role, content: [{type: '<allowlisted>'}, ...]}`. Caught earliest
+# (priority 5) — before envelope-style rules — so it isn't shadowed.
+#
+# The split-into-content-and-tool-calls is done in helpers because doing it
+# structurally would need three more operators for one rule.
+
+id: compat_array
+kind: chat
+priority: 5
+
+rules:
+    - on:
+          role: { is: string }
+          content:
+              every:
+                  shape:
+                      type:
+                          in:
+                              - text
+                              - output_text
+                              - input_text
+                              - function
+                              - image
+                              - input_image
+                              - image_url
+                              - file
+                              - audio
+                              - document
+      emit:
+          # Content keeps every block that isn't a `function` (those become
+          # tool_calls below). `if_empty: ''` matches the legacy
+          # "all-functions → empty content" behavior.
+          content:
+              reject:
+                  from: $.content
+                  where: { type: function }
+                  if_empty: ''
+          # Lift `function` blocks into the canonical tool_calls shape.
+          toolCalls:
+              select:
+                  from: $.content
+                  where: { type: function }
+                  pluck:
+                      id: $.id
+                      name: $.function.name
+                      args: $.function.arguments

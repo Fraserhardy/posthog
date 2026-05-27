@@ -1,0 +1,120 @@
+# Anthropic provider — block-level shapes plus the tool_result envelope.
+#
+# Coverage notes (see TRADEOFFS.md):
+#   - role-based envelope with string content overlaps with OpenAI Chat
+#     compat (which carries `spread:` of unknown kwargs); we leave it to
+#     legacy.
+#   - role-based envelope with array content is the N+1-messages shape;
+#     would need a `followups:` primitive to port faithfully.
+
+id: anthropic
+kind: chat
+priority: 50
+
+rules:
+    # text block
+    - on:
+          type: text
+          text: { exists: true }
+      emit:
+          content: $.text
+
+    # thinking block
+    - on:
+          type: thinking
+      emit:
+          role: thinking
+          content: $.thinking
+
+    # tool_use block
+    - on:
+          type: tool_use
+      emit:
+          content: ''
+          toolCall:
+              id: $.id
+              name: $.name
+              args: $.input
+
+    # tool_result with array content — delegate each child so block rules
+    # below normalize them; then stamp role and tool_call_id onto each
+    # produced message.
+    - on:
+          type: tool_result
+          content: { is: array }
+          tool_use_id: { exists: true }
+      delegateEach: $.content
+      stamp:
+          role: tool_result
+          toolCallId: $.tool_use_id
+
+    # tool_result with scalar content
+    - on:
+          type: tool_result
+          tool_use_id: { exists: true }
+      emit:
+          role: tool_result
+          content: $.content
+          toolCallId: $.tool_use_id
+
+    # image block — Anthropic ships as `source: {type: base64, data, media_type}`.
+    # We reshape it into a `{type: image, image: <data-url>}` content part.
+    - on:
+          type: image
+          source:
+              data: { is: string }
+              media_type: { is: string }
+      emit:
+          content:
+              - type: image
+                image: 'data:$.source.media_type;base64,$.source.data'
+
+    # document block — same shape as image but emits a `{type: file, ...}` part.
+    - on:
+          type: document
+          source:
+              data: { is: string }
+              media_type: { is: string }
+      emit:
+          content:
+              - type: file
+                file:
+                    mime_type: $.source.media_type
+                    data: $.source.data
+
+    # Role-based envelope with array content AND top-level tool_calls.
+    # The SDK ships tool_calls both in the array (as tool_use blocks) and at
+    # the top level — we use the top-level version (richer) and drop the
+    # in-content duplicates by filtering them out before delegateEach.
+    - on:
+          role: { is: string }
+          content: { is: array }
+          tool_calls: { is: array }
+      delegateEach:
+          reject:
+              from: $.content
+              where: { type: tool_use }
+      followups:
+          - role: $.role
+            content: ''
+            toolCalls: $.tool_calls
+
+    # Role-based envelope with array content, no top-level tool_calls.
+    # Dispatch each block as if it were its own top-level message; the
+    # block-level rules above (and rules in other providers) catch them.
+    - on:
+          role: { is: string }
+          content: { is: array }
+      delegateEach: $.content
+
+    # Role-based envelope with string content. Lower priority than OpenAI
+    # Chat (which catches `{role, content: string|null}` first via spread).
+    # This rule fires for shapes where OpenAI Chat didn't match — in
+    # practice that means `content` is a plain string but `role` isn't on
+    # the `OpenAICompatMessage` allowlist (or content was missing one of
+    # the OpenAI-specific markers). We just emit role + content.
+    - on:
+          role: { is: string }
+          content: { is: string }
+      emit:
+          content: $.content

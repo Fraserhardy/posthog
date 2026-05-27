@@ -1,0 +1,84 @@
+# OpenAI Responses API — discriminated by `type`.
+
+id: openai_responses
+kind: chat
+priority: 40
+
+rules:
+    # function_call → assistant tool call
+    - on:
+          type: function_call
+          call_id: { is: string }
+          name: { is: string }
+          arguments: { exists: true }
+      emit:
+          role: assistant
+          content: ''
+          toolCall:
+              id: $.call_id
+              name: $.name
+              args: $.arguments
+
+    # function_call_output → tool result
+    - on:
+          type: function_call_output
+          call_id: { is: string }
+          output: { exists: true }
+      emit:
+          role: tool_result
+          content: $.output
+          toolCallId: $.call_id
+
+    # reasoning with array `summary[].text` — joined with newlines
+    - on:
+          type: reasoning
+          summary: { is: array }
+      emit:
+          role: thinking
+          content:
+              join:
+                  of: $.summary
+                  field: text
+                  sep: "\n"
+
+    # reasoning with plain `.text`
+    - on:
+          type: reasoning
+          text: { is: string }
+      emit:
+          role: thinking
+          content: $.text
+
+    # reasoning with neither summary nor text — empty thinking message
+    - on:
+          type: reasoning
+      emit:
+          role: thinking
+          content: ''
+
+    # Built-in tool calls. The args branch (parse-if-string /
+    # wrap-if-non-object / spread-rest-on-missing) is procedural — we route
+    # it through a named helper kept in `helpers.ts`.
+    - on:
+          type:
+              in:
+                  - web_search_call
+                  - code_interpreter_call
+                  - image_generation_call
+                  - mcp_call
+                  - file_search_call
+                  - computer_call
+          id: { is: string }
+      emit:
+          role: assistant
+          content: ''
+          toolCall:
+              id: $.id
+              name:
+                  coalesce:
+                      - $.name
+                      - $.type
+              args:
+                  helper:
+                      name: openai_responses_builtin_args
+                      input: $

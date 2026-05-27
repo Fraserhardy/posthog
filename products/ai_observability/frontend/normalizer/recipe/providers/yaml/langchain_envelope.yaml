@@ -1,0 +1,19 @@
+# LangChain serialized-envelope shape.
+#
+# {lc: 1, type: 'constructor', id: [...], kwargs: {...}} is the
+# `lc_serializable` dump some SDKs emit. The actual message lives in
+# `kwargs`; we delegate it back through the pipeline so the bare LangChain
+# rule picks it up (role derived from kwargs.type, content from
+# kwargs.content). This shape used to land in the cajole fallback —
+# ~6.5k events/30d on team 2 alone.
+
+id: langchain_envelope
+kind: chat
+priority: 15
+
+rules:
+    - on:
+          lc: 1
+          type: constructor
+          kwargs: { is: object }
+      delegate: $.kwargs
