@@ -272,14 +272,17 @@ class Subscription(ModelActivityMixin, models.Model):
         elif self.dashboard:
             return SubscriptionResourceInfo("Dashboard", self.dashboard.name or "Dashboard", self.dashboard.url)
         elif self.resource_type == self.ResourceType.AI_PROMPT:
-            # "AI" (not "AI report") because callers append the noun, e.g. f"PostHog {kind} report".
-            return SubscriptionResourceInfo("AI", self.ai_display_name, self.url or "")
+            ai_name = self.title or (self.prompt or "").strip()[:AI_PROMPT_DISPLAY_MAX_LEN] or "AI report"
+            return SubscriptionResourceInfo("AI", ai_name, self.url or "")
 
         return None
 
     @property
-    def ai_display_name(self) -> str:
-        return self.title or (self.prompt or "").strip()[:AI_PROMPT_DISPLAY_MAX_LEN] or "AI report"
+    def display_name(self) -> str:
+        info = self.resource_info
+        if info is not None:
+            return info.name
+        return self.title or "Subscription"
 
     @property
     def summary(self):
@@ -342,18 +345,13 @@ def subscription_saved(sender, instance, created, raw, using, **kwargs):
 
 
 @mutable_receiver(model_activity_signal, sender=Subscription)
-def log_ai_subscription_activity(
+def log_subscription_activity(
     sender, scope, before_update, after_update, activity, user, was_impersonated=False, **kwargs
 ):
-    # AI subscriptions carry higher blast radius (prompts can spend money, output is LLM-authored),
-    # so we record them in the activity log even though insight/dashboard subscriptions are not.
     instance = after_update or before_update
-    if instance is None or instance.resource_type != Subscription.ResourceType.AI_PROMPT or not instance.created_by:
+    if instance is None:
         return
 
-    # Scheduler saves that only touch `next_delivery_date` never reach here: `signal_exclusions`
-    # suppresses the signal whether or not the save passes `update_fields` (the mixin's
-    # changed-fields check honours the exclusion list), so a schedule bump is not logged.
     changes = changes_between("Subscription", previous=before_update, current=after_update)
     try:
         log_activity(
@@ -365,7 +363,7 @@ def log_ai_subscription_activity(
             scope="Subscription",
             activity=activity,
             detail=Detail(
-                name=instance.ai_display_name,
+                name=instance.display_name,
                 changes=changes,
             ),
         )

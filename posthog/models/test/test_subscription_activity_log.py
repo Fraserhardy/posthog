@@ -45,24 +45,28 @@ class TestSubscriptionActivityLog(BaseTest):
 
     @parameterized.expand(
         [
-            (Subscription.ResourceType.INSIGHT,),
-            (Subscription.ResourceType.DASHBOARD,),
+            (Subscription.ResourceType.INSIGHT, "My insight"),
+            (Subscription.ResourceType.DASHBOARD, "My dashboard"),
         ]
     )
-    def test_non_ai_subscription_does_not_log(self, resource_type: Subscription.ResourceType):
+    def test_non_ai_subscription_logs_activity(self, resource_type: Subscription.ResourceType, expected_name: str):
         relation = (
-            {"insight": Insight.objects.create(team=self.team)}
+            {"insight": Insight.objects.create(team=self.team, name="My insight")}
             if resource_type == Subscription.ResourceType.INSIGHT
-            else {"dashboard": Dashboard.objects.create(team=self.team)}
+            else {"dashboard": Dashboard.objects.create(team=self.team, name="My dashboard")}
         )
-        self._create_subscription(resource_type=resource_type, prompt=None, **relation)
+        subscription = self._create_subscription(resource_type=resource_type, prompt=None, **relation)
 
-        assert self._subscription_logs().count() == 0
+        logs = self._subscription_logs()
+        assert logs.count() == 1
+        assert logs[0].activity == "created"
+        assert logs[0].item_id == str(subscription.id)
+        assert logs[0].detail["name"] == expected_name
 
-    def test_subscription_without_created_by_does_not_log(self):
+    def test_subscription_without_created_by_still_logs(self):
         self._create_subscription(created_by=None)
 
-        assert self._subscription_logs().count() == 0
+        assert self._subscription_logs().count() == 1
 
     def test_updating_ai_subscription_prompt_records_change(self):
         subscription = self._create_subscription()
@@ -117,7 +121,24 @@ class TestSubscriptionActivityLog(BaseTest):
             start_date=datetime(2022, 1, 1, tzinfo=ZoneInfo("UTC")),
         )
 
-        assert subscription.ai_display_name == expected
+        assert subscription.display_name == expected
+
+    def test_display_name_for_insight_and_dashboard(self):
+        insight_sub = self._create_subscription(
+            resource_type=Subscription.ResourceType.INSIGHT,
+            prompt=None,
+            title=None,
+            insight=Insight.objects.create(team=self.team, name="Signups by week"),
+        )
+        dashboard_sub = self._create_subscription(
+            resource_type=Subscription.ResourceType.DASHBOARD,
+            prompt=None,
+            title=None,
+            dashboard=Dashboard.objects.create(team=self.team, name="Growth"),
+        )
+
+        assert insight_sub.display_name == "Signups by week"
+        assert dashboard_sub.display_name == "Growth"
 
     def test_soft_deleting_ai_subscription_records_change(self):
         subscription = self._create_subscription()
