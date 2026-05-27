@@ -1,6 +1,6 @@
 import type { APIRequestContext, Page } from '@playwright/test'
 
-import { LOGIN_PASSWORD, LOGIN_USERNAME, expect, test } from '../utils/playwright-test-base'
+import { expect, test } from '../utils/playwright-test-base'
 
 const VALID_PASSWORD = 'hedgE-hog-123%'
 
@@ -38,28 +38,6 @@ const submitEmailAndExpectExistingAccount = async (page: Page, email: string): P
 }
 
 test.describe('Signup', () => {
-    // Every successful-signup assertion in this file expects the backend to redirect to
-    // /verify_email/<uuid>. That branch in posthog/api/signup.py:get_redirect_url only runs
-    // when is_email_available() is true, which requires the EMAIL_HOST instance setting to
-    // be non-empty. CI sets it via the workflow env (.github/workflows/ci-e2e-playwright.yml);
-    // locally we set it through the staff-only /api/instance_settings/ endpoint so the file
-    // is self-sufficient against any stack. Setting persists in DB — harmless to re-set.
-    test.beforeAll(async ({ request }) => {
-        const loginResponse = await request.post('/api/login/', {
-            data: { email: LOGIN_USERNAME, password: LOGIN_PASSWORD },
-        })
-        expect(loginResponse.ok()).toBe(true)
-
-        const state = await request.storageState()
-        const csrfCookie = state.cookies.find((c) => c.name === 'posthog_csrftoken')?.value ?? ''
-
-        const updateResponse = await request.patch('/api/instance_settings/EMAIL_HOST/', {
-            headers: { 'X-CSRFToken': decodeURIComponent(csrfCookie) },
-            data: { value: 'email.test.posthog.net' },
-        })
-        expect(updateResponse.ok()).toBe(true)
-    })
-
     test.beforeEach(async ({ page }) => {
         await page.route('**/flags/*', async (route) => {
             const response = {
@@ -236,9 +214,7 @@ test.describe('Signup', () => {
         )
     })
 
-    // TODO un-skip.
-    // Skipping test as it was failing on master, see https://posthog.slack.com/archives/C0113360FFV/p1749742204672659
-    test.skip('Shows redirect notice if redirecting for maintenance', async ({ page }) => {
+    test('Shows redirect notice if redirecting for maintenance', async ({ page }) => {
         // Equivalent to setupFeatureFlags in Playwright
         await page.route('**/flags/*', async (route) => {
             const response = {
