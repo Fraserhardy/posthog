@@ -89,13 +89,6 @@ class Subscription(ModelActivityMixin, models.Model):
         SubscriptionFrequency.YEARLY: YEARLY,
     }
 
-    resource_type = models.CharField(
-        max_length=20,
-        choices=ResourceType.choices,
-        default=ResourceType.INSIGHT,
-        db_index=False,
-    )
-
     # Relations - i.e. WHAT are we exporting?
     team = models.ForeignKey("Team", on_delete=models.CASCADE)
     dashboard = models.ForeignKey("dashboards.Dashboard", on_delete=models.CASCADE, null=True)
@@ -164,12 +157,6 @@ class Subscription(ModelActivityMixin, models.Model):
             self._rrule = self.rrule
 
     def save(self, *args, **kwargs) -> None:
-        resolved_resource_type = self._resolve_resource_type()
-        if resolved_resource_type != self.resource_type:
-            self.resource_type = resolved_resource_type
-            if "update_fields" in kwargs and kwargs["update_fields"] is not None:
-                kwargs["update_fields"] = [*kwargs["update_fields"], "resource_type"]
-
         # Only if the schedule has changed do we update the next delivery date
         # _rrule may not be set if object was loaded with deferred fields
         if not self.id or str(getattr(self, "_rrule", None)) != str(self.rrule):
@@ -178,14 +165,15 @@ class Subscription(ModelActivityMixin, models.Model):
                 kwargs["update_fields"].append("next_delivery_date")
         super().save(*args, **kwargs)
 
-    def _resolve_resource_type(self) -> str:
+    @property
+    def resource_type(self) -> str:
         if self.insight_id:
             return self.ResourceType.INSIGHT
         if self.dashboard_id:
             return self.ResourceType.DASHBOARD
         if self.prompt:
             return self.ResourceType.AI_PROMPT
-        return self.resource_type
+        return self.ResourceType.INSIGHT
 
     @staticmethod
     def _build_rrule(
@@ -267,29 +255,30 @@ class Subscription(ModelActivityMixin, models.Model):
         return None
 
     @property
-    def url(self):
-        if self.insight:
-            return absolute_uri(f"/insights/{self.insight.short_id}/subscriptions/{self.id}")
-        elif self.dashboard:
-            return absolute_uri(f"/dashboard/{self.dashboard_id}/subscriptions/{self.id}")
-        elif self.resource_type == self.ResourceType.AI_PROMPT:
-            return absolute_uri(f"/project/{self.team_id}/subscriptions/{self.id}")
+    def url(self) -> str | None:
+        match self.resource_type:
+            case self.ResourceType.INSIGHT if self.insight:
+                return absolute_uri(f"/insights/{self.insight.short_id}/subscriptions/{self.id}")
+            case self.ResourceType.DASHBOARD if self.dashboard:
+                return absolute_uri(f"/dashboard/{self.dashboard_id}/subscriptions/{self.id}")
+            case self.ResourceType.AI_PROMPT:
+                return absolute_uri(f"/project/{self.team_id}/subscriptions/{self.id}")
         return None
 
     @property
     def resource_info(self) -> Optional[SubscriptionResourceInfo]:
-        if self.insight:
-            return SubscriptionResourceInfo(
-                "Insight",
-                f"{self.insight.name or self.insight.derived_name}",
-                self.insight.url,
-            )
-        elif self.dashboard:
-            return SubscriptionResourceInfo("Dashboard", self.dashboard.name or "Dashboard", self.dashboard.url)
-        elif self.resource_type == self.ResourceType.AI_PROMPT:
-            ai_name = self.title or (self.prompt or "").strip()[:AI_PROMPT_DISPLAY_MAX_LEN] or "AI report"
-            return SubscriptionResourceInfo("AI", ai_name, self.url or "")
-
+        match self.resource_type:
+            case self.ResourceType.INSIGHT if self.insight:
+                return SubscriptionResourceInfo(
+                    "Insight",
+                    f"{self.insight.name or self.insight.derived_name}",
+                    self.insight.url,
+                )
+            case self.ResourceType.DASHBOARD if self.dashboard:
+                return SubscriptionResourceInfo("Dashboard", self.dashboard.name or "Dashboard", self.dashboard.url)
+            case self.ResourceType.AI_PROMPT:
+                ai_name = self.title or (self.prompt or "").strip()[:AI_PROMPT_DISPLAY_MAX_LEN] or "AI report"
+                return SubscriptionResourceInfo("AI", ai_name, self.url or "")
         return None
 
     @property

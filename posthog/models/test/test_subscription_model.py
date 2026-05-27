@@ -87,7 +87,7 @@ class TestSubscription(BaseTest):
             ),
         ]
     )
-    def test_save_derives_resource_type_from_relation(
+    def test_resource_type_derived_from_relation(
         self, _name: str, make_subscription: Callable[..., Subscription], expected: "Subscription.ResourceType"
     ):
         subscription = make_subscription(self)

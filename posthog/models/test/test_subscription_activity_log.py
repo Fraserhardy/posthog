@@ -20,7 +20,6 @@ class TestSubscriptionActivityLog(BaseTest):
         params: dict = {
             "team": self.team,
             "created_by": self.user,
-            "resource_type": Subscription.ResourceType.AI_PROMPT,
             "title": "Weekly AI digest",
             "prompt": "Summarize last week's signups",
             "target_type": "email",
@@ -35,28 +34,29 @@ class TestSubscriptionActivityLog(BaseTest):
     def _subscription_logs(self):
         return ActivityLog.objects.filter(scope="Subscription").order_by("created_at")
 
-    def test_creating_ai_subscription_logs_activity(self):
-        subscription = self._create_subscription()
-
-        logs = self._subscription_logs()
-        assert logs.count() == 1
-        assert logs[0].activity == "created"
-        assert logs[0].item_id == str(subscription.id)
-        assert logs[0].detail["name"] == "Weekly AI digest"
-
     @parameterized.expand(
         [
-            (Subscription.ResourceType.INSIGHT, "My insight"),
-            (Subscription.ResourceType.DASHBOARD, "My dashboard"),
+            ("ai", lambda self: self._create_subscription(), "Weekly AI digest"),
+            (
+                "insight",
+                lambda self: self._create_subscription(
+                    prompt=None, title=None, insight=Insight.objects.create(team=self.team, name="My insight")
+                ),
+                "My insight",
+            ),
+            (
+                "dashboard",
+                lambda self: self._create_subscription(
+                    prompt=None, title=None, dashboard=Dashboard.objects.create(team=self.team, name="My dashboard")
+                ),
+                "My dashboard",
+            ),
         ]
     )
-    def test_non_ai_subscription_logs_activity(self, resource_type: Subscription.ResourceType, expected_name: str):
-        relation = (
-            {"insight": Insight.objects.create(team=self.team, name="My insight")}
-            if resource_type == Subscription.ResourceType.INSIGHT
-            else {"dashboard": Dashboard.objects.create(team=self.team, name="My dashboard")}
-        )
-        subscription = self._create_subscription(resource_type=resource_type, prompt=None, **relation)
+    def test_creating_subscription_logs_activity(
+        self, _name: str, make_subscription: Callable[..., Subscription], expected_name: str
+    ):
+        subscription = make_subscription(self)
 
         logs = self._subscription_logs()
         assert logs.count() == 1
@@ -116,28 +116,17 @@ class TestSubscriptionActivityLog(BaseTest):
         [
             (
                 "ai_title_wins",
-                lambda self: self._unsaved_subscription(
-                    resource_type=Subscription.ResourceType.AI_PROMPT, title="My title", prompt="the prompt"
-                ),
+                lambda self: self._unsaved_subscription(title="My title", prompt="the prompt"),
                 "My title",
             ),
             (
                 "ai_prompt_snippet_when_no_title",
-                lambda self: self._unsaved_subscription(
-                    resource_type=Subscription.ResourceType.AI_PROMPT, prompt="x" * 80
-                ),
+                lambda self: self._unsaved_subscription(prompt="x" * 80),
                 "x" * 60,
             ),
             (
                 "ai_whitespace_prompt_falls_back",
-                lambda self: self._unsaved_subscription(
-                    resource_type=Subscription.ResourceType.AI_PROMPT, prompt="   "
-                ),
-                "AI report",
-            ),
-            (
-                "ai_empty_falls_back",
-                lambda self: self._unsaved_subscription(resource_type=Subscription.ResourceType.AI_PROMPT),
+                lambda self: self._unsaved_subscription(prompt="   "),
                 "AI report",
             ),
             (
