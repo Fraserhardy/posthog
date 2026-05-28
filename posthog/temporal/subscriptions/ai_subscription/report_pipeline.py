@@ -2,6 +2,7 @@ import re
 import uuid
 import asyncio
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Optional, Union
 
 import structlog
@@ -61,9 +62,15 @@ _RETRYABLE_QUERY_ERRORS: tuple[type[BaseException], ...] = (
 )
 
 
+class ReportStage(StrEnum):
+    PLANNER = "planner"
+    QUERY = "query"
+    SYNTHESIS = "synthesis"
+
+
 class AiReportStageError(Exception):
     # PromptRejectedError is intentionally not wrapped — callers catch it by type.
-    def __init__(self, stage: str, original: BaseException) -> None:
+    def __init__(self, stage: ReportStage, original: BaseException) -> None:
         self.stage = stage
         self.original = original
         super().__init__(f"AI report failed at {stage} stage: {original}")
@@ -102,7 +109,7 @@ async def _plan(
     except PromptRejectedError:
         raise
     except Exception as exc:
-        raise AiReportStageError("planner", exc) from exc
+        raise AiReportStageError(ReportStage.PLANNER, exc) from exc
 
 
 async def _execute_plan(
@@ -115,7 +122,7 @@ async def _execute_plan(
         return await _run_steps(spec, team, user, trace_correlation_id)
     except Exception as exc:
         # per-step failures degrade to placeholders in run_step; this catches orchestration failure
-        raise AiReportStageError("query", exc) from exc
+        raise AiReportStageError(ReportStage.QUERY, exc) from exc
 
 
 async def _synthesize(
@@ -155,7 +162,7 @@ async def _synthesize(
             ],
         )
     except Exception as exc:
-        raise AiReportStageError("synthesis", exc) from exc
+        raise AiReportStageError(ReportStage.SYNTHESIS, exc) from exc
     content = result.content if hasattr(result, "content") else str(result)
     return content if isinstance(content, str) else str(content)
 
@@ -330,4 +337,4 @@ async def _capture_report_quality(
         logger.warning("ai_report.quality_capture_failed", trace_correlation_id=trace_correlation_id, exc_info=True)
 
 
-__all__ = ["generate_ai_report", "AiReportStageError"]
+__all__ = ["generate_ai_report", "AiReportStageError", "ReportStage"]

@@ -6,6 +6,7 @@ import structlog
 from markdown_it import MarkdownIt
 from markdown_to_mrkdwn import SlackMarkdownConverter
 
+from posthog.api.utils import hostname_in_allowed_url_list
 from posthog.email import EmailMessage
 from posthog.models.integration import Integration
 from posthog.models.subscription import Subscription, get_unsubscribe_token
@@ -64,8 +65,9 @@ SLACK_MRKDWN_SECTION_LIMIT = 2900
 
 # Only PostHog hosts are allowed in delivered report links. Any other host is stripped from
 # the LLM output before rendering — Slack auto-unfurls outbound links server-side, which is
-# an exfil channel an injected synthesis prompt could otherwise drive.
-_ALLOWED_LINK_HOSTS = {"posthog.com", "app.posthog.com", "eu.posthog.com", "us.posthog.com"}
+# an exfil channel an injected synthesis prompt could otherwise drive. Wildcard entries cover
+# the `<region>.posthog.com` subdomains via `hostname_in_allowed_url_list`'s regex matching.
+_ALLOWED_LINK_URLS = ["https://posthog.com", "https://*.posthog.com"]
 # URL group supports one level of balanced parens so e.g. wikipedia /Foo_(bar) doesn't truncate
 _MARKDOWN_LINK_RE = re.compile(r"\[([^\]]*)\]\(((?:[^()\s]+|\([^)]*\))+)(?:\s+\"[^\"]*\")?\)")
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
@@ -76,9 +78,7 @@ def _is_allowed_link_url(url: str) -> bool:
         host = (urlparse(url).hostname or "").lower()
     except ValueError:
         return False
-    if not host:
-        return False
-    return host in _ALLOWED_LINK_HOSTS or any(host.endswith("." + h) for h in _ALLOWED_LINK_HOSTS)
+    return hostname_in_allowed_url_list(_ALLOWED_LINK_URLS, host)
 
 
 def _strip_external_links_markdown(markdown: str) -> str:
