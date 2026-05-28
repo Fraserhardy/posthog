@@ -273,6 +273,36 @@ def register_grandfathered_environment_nested_viewset(
     return environment_nested, project_nested
 
 
+def register_team_nested_viewset(
+    prefix: str, viewset: type[viewsets.GenericViewSet], basename: str, parents_query_lookups: list[str]
+) -> tuple[NestedRegistryItem, NestedRegistryItem]:
+    """
+    Register a team-nested viewset under /api/projects/:team_id/ (canonical) plus
+    /api/environments/:team_id/ as a deprecated alias for backward compatibility.
+
+    The env route is auto-marked `deprecated: true` in the generated OpenAPI
+    schema by the postprocess hook in posthog.api.documentation whenever a
+    matching /api/projects/ route exists, which makes the project route the
+    one Orval picks up as canonical for the generated TypeScript client.
+
+    Use this for endpoints that should expose both surfaces — typically because
+    an existing client base already integrated against /api/environments/. New
+    endpoints with no existing consumers should register directly under
+    projects_router without the env alias.
+
+    Returns (project_nested, environment_nested).
+    """
+    if parents_query_lookups[0] != "team_id":
+        raise ValueError("Only endpoints with team_id as the first parent query lookup can be team-nested")
+    if not basename.startswith("project_"):
+        raise ValueError("basename must start with `project_`")
+    project_nested = projects_router.register(prefix, viewset, basename, parents_query_lookups)
+    environment_nested = environments_router.register(
+        prefix, viewset, basename.replace("project_", "environment_"), parents_query_lookups
+    )
+    return project_nested, environment_nested
+
+
 environment_plugins_configs_router, legacy_project_plugins_configs_router = (
     register_grandfathered_environment_nested_viewset(
         r"plugin_configs", plugin.PluginConfigViewSet, "environment_plugin_configs", ["team_id"]
@@ -332,7 +362,7 @@ projects_router.register(
 projects_router.register(
     r"my_notifications",
     my_notifications.MyNotificationsViewSet,
-    "project_notifications",
+    "project_my_notifications",
     ["project_id"],
 )
 project_feature_flags_router = projects_router.register(
@@ -406,38 +436,38 @@ environment_dashboards_router, legacy_project_dashboards_router = register_grand
     r"dashboards", dashboard.DashboardsViewSet, "environment_dashboards", ["team_id"]
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"column_configurations",
     ColumnConfigurationViewSet,
-    "environment_column_configurations",
+    "project_column_configurations",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"event_filter",
     EventFilterConfigViewSet,
-    "environment_event_filter",
+    "project_event_filter",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"health_issues",
     health_issue.HealthIssueViewSet,
-    "environment_health_issues",
+    "project_health_issues",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_prompts",
     LLMPromptViewSet,
-    "environment_llm_prompts",
+    "project_llm_prompts",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_skills",
     LLMSkillViewSet,
-    "environment_llm_skills",
+    "project_llm_skills",
     ["team_id"],
 )
 
@@ -454,24 +484,24 @@ register_grandfathered_environment_nested_viewset(
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"customer_profile_configs",
     customer_analytics.CustomerProfileConfigViewSet,
-    "environment_customer_profile_configs",
+    "project_customer_profile_configs",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"customer_journeys",
     customer_analytics.CustomerJourneyViewSet,
-    "environment_customer_journeys",
+    "project_customer_journeys",
     ["team_id"],
 )
 
-environment_accounts_router = environments_router.register(
+project_accounts_router, environment_accounts_router = register_team_nested_viewset(
     r"accounts",
     customer_analytics.AccountViewSet,
-    "environment_accounts",
+    "project_accounts",
     ["team_id"],
 )
 
@@ -479,6 +509,12 @@ environment_accounts_router.register(
     r"notebooks",
     customer_analytics.AccountNotebookViewSet,
     "environment_account_notebooks",
+    ["team_id", "account_id"],
+)
+project_accounts_router.register(
+    r"notebooks",
+    customer_analytics.AccountNotebookViewSet,
+    "project_account_notebooks",
     ["team_id", "account_id"],
 )
 
@@ -489,10 +525,10 @@ projects_router.register(
     ["project_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"materialized_column_slots",
     materialized_column_slot.MaterializedColumnSlotViewSet,
-    "environment_materialized_column_slots",
+    "project_materialized_column_slots",
     ["team_id"],
 )
 
@@ -661,47 +697,47 @@ register_grandfathered_environment_nested_viewset(
     "environment_external_data_schemas",
     ["team_id"],
 )
-environments_router.register(
+register_team_nested_viewset(
     r"fix_hogql",
     fix_hogql.FixHogQLViewSet,
     "project_fix_hogql",
     ["team_id"],
 )
-environments_router.register(
+register_team_nested_viewset(
     r"warehouse_saved_query_drafts",
     saved_query_draft.DataWarehouseSavedQueryDraftViewSet,
-    "environment_warehouse_saved_query_drafts",
+    "project_warehouse_saved_query_drafts",
     ["team_id"],
 )
-environments_router.register(
+register_team_nested_viewset(
     r"managed_viewsets",
     managed_viewset.DataWarehouseManagedViewSetViewSet,
-    "environment_managed_viewsets",
+    "project_managed_viewsets",
     ["team_id"],
 )
-environments_router.register(
+register_team_nested_viewset(
     r"data_modeling_dags",
     DAGViewSet,
-    "environment_data_modeling_dags",
+    "project_data_modeling_dags",
     ["team_id"],
 )
-environments_router.register(
+register_team_nested_viewset(
     r"data_modeling_nodes",
     NodeViewSet,
-    "environment_data_modeling_nodes",
+    "project_data_modeling_nodes",
     ["team_id"],
 )
-environments_router.register(
+register_team_nested_viewset(
     r"data_modeling_edges",
     EdgeViewSet,
-    "environment_data_modeling_edges",
+    "project_data_modeling_edges",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"notifications",
     NotificationsViewSet,
-    "environment_notifications",
+    "project_notifications",
     ["team_id"],
 )
 
@@ -894,10 +930,10 @@ environment_sessions_recordings_router, legacy_project_session_recordings_router
     )
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"session_recording_external_references",
     SessionRecordingExternalReferenceViewSet,
-    "environment_session_recording_external_references",
+    "project_session_recording_external_references",
     ["team_id"],
 )
 
@@ -1075,101 +1111,101 @@ projects_router.register(
     ["project_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"error_tracking/assignment_rules",
     ErrorTrackingAssignmentRuleViewSet,
-    "environment_error_tracking_assignment_rule",
+    "project_error_tracking_assignment_rule",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"error_tracking/grouping_rules",
     ErrorTrackingGroupingRuleViewSet,
-    "environment_error_tracking_grouping_rule",
+    "project_error_tracking_grouping_rule",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"error_tracking/suppression_rules",
     ErrorTrackingSuppressionRuleViewSet,
-    "environment_error_tracking_suppression_rule",
+    "project_error_tracking_suppression_rule",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"error_tracking/recommendations",
     ErrorTrackingRecommendationViewSet,
-    "environment_error_tracking_recommendation",
+    "project_error_tracking_recommendation",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"error_tracking/fingerprints",
     ErrorTrackingFingerprintViewSet,
-    "environment_error_tracking_fingerprint",
+    "project_error_tracking_fingerprint",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"error_tracking/issues",
     ErrorTrackingIssueViewSet,
-    "environment_error_tracking_issue",
+    "project_error_tracking_issue",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"error_tracking/query",
     ErrorTrackingQueryViewSet,
-    "environment_error_tracking_query",
+    "project_error_tracking_query",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"error_tracking/external_references",
     ErrorTrackingExternalReferenceViewSet,
-    "environment_error_tracking_external_references",
+    "project_error_tracking_external_references",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"error_tracking/stack_frames",
     ErrorTrackingStackFrameViewSet,
-    "environment_error_tracking_stack_frames",
+    "project_error_tracking_stack_frames",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"error_tracking/spike_detection_config",
     ErrorTrackingSpikeDetectionConfigViewSet,
-    "environment_error_tracking_spike_detection_config",
+    "project_error_tracking_spike_detection_config",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"error_tracking/settings",
     ErrorTrackingSettingsViewSet,
-    "environment_error_tracking_settings",
+    "project_error_tracking_settings",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"error_tracking/spike_events",
     ErrorTrackingSpikeEventViewSet,
-    "environment_error_tracking_spike_events",
+    "project_error_tracking_spike_events",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"error_tracking/git-provider-file-links",
     GitProviderFileLinksViewSet,
-    "environment_error_tracking_git_provider_file_links",
+    "project_error_tracking_git_provider_file_links",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"signals",
     SignalViewSet,
-    "environment_signals",
+    "project_signals",
     ["team_id"],
 )
 signal_reports_router = projects_router.register(
@@ -1209,7 +1245,7 @@ projects_router.register(
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"quick_filters",
     quick_filters.QuickFilterViewSet,
     "project_quick_filters",
@@ -1267,8 +1303,11 @@ projects_router.register(
     ["team_id"],
 )
 
-environments_router.register(
-    r"conversations/views", conversations.TicketViewViewSet, "environment_conversations_views", ["team_id"]
+register_team_nested_viewset(
+    r"conversations/views",
+    conversations.TicketViewViewSet,
+    "project_conversations_views",
+    ["team_id"],
 )
 
 projects_router.register(
@@ -1326,22 +1365,22 @@ register_grandfathered_environment_nested_viewset(
     r"data_color_themes", data_color_theme.DataColorThemeViewSet, "environment_data_color_themes", ["team_id"]
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"web_vitals",
     web_vitals.WebVitalsViewSet,
-    "environment_web_vitals",
+    "project_web_vitals",
     ["team_id"],
 )
-environments_router.register(
+register_team_nested_viewset(
     r"web_analytics_filter_presets",
     WebAnalyticsFilterPresetViewSet,
-    "environment_web_analytics_filter_preset",
+    "project_web_analytics_filter_preset",
     ["team_id"],
 )
-environments_router.register(
+register_team_nested_viewset(
     r"web_analytics",
     web_analytics_api.WebAnalyticsViewSet,
-    "environment_web_analytics",
+    "project_web_analytics",
     ["team_id"],
 )
 
@@ -1354,26 +1393,31 @@ register_grandfathered_environment_nested_viewset(
     ["team_id"],
 )
 
-environments_router.register(r"lineage", LineageViewSet, "environment_lineage", ["team_id"])
+register_team_nested_viewset(
+    r"lineage",
+    LineageViewSet,
+    "project_lineage",
+    ["team_id"],
+)
 
-environments_router.register(
+register_team_nested_viewset(
     r"messaging_templates",
     MessageTemplatesViewSet,
-    "environment_messaging_templates",
+    "project_messaging_templates",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"messaging_categories",
     MessageCategoryViewSet,
-    "environment_messaging_categories",
+    "project_messaging_categories",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"messaging_preferences",
     MessagePreferencesViewSet,
-    "environment_messaging_preferences",
+    "project_messaging_preferences",
     ["team_id"],
 )
 
@@ -1385,12 +1429,17 @@ register_grandfathered_environment_nested_viewset(
 register_grandfathered_environment_nested_viewset(
     r"logs/sampling_rules", logs.LogsSamplingRuleViewSet, "environment_logs_sampling_rules", ["team_id"]
 )
-environments_router.register(r"logs/views", logs.LogsViewViewSet, "environment_logs_views", ["team_id"])
+register_team_nested_viewset(
+    r"logs/views",
+    logs.LogsViewViewSet,
+    "project_logs_views",
+    ["team_id"],
+)
 
-environments_router.register(
+register_team_nested_viewset(
     r"logs/explainLogWithAI",
     logs.LogExplainViewSet,
-    "environment_logs_explain_with_ai",
+    "project_logs_explain_with_ai",
     ["team_id"],
 )
 
@@ -1398,23 +1447,29 @@ register_grandfathered_environment_nested_viewset(
     r"endpoints", endpoints.EndpointViewSet, "environment_endpoints", ["team_id"]
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"user_interviews",
     UserInterviewViewSet,
-    "environment_user_interviews",
+    "project_user_interviews",
     ["team_id"],
 )
 
-user_interview_topics_router = environments_router.register(
+project_user_interview_topics_router, user_interview_topics_router = register_team_nested_viewset(
     r"user_interview_topics",
     UserInterviewTopicViewSet,
-    "environment_user_interview_topics",
+    "project_user_interview_topics",
     ["team_id"],
 )
 user_interview_topics_router.register(
     r"interviewees",
     IntervieweeContextViewSet,
     "environment_user_interview_topic_interviewees",
+    ["team_id", "topic_id"],
+)
+project_user_interview_topics_router.register(
+    r"interviewees",
+    IntervieweeContextViewSet,
+    "project_user_interview_topic_interviewees",
     ["team_id", "topic_id"],
 )
 
@@ -1443,45 +1498,45 @@ projects_router.register(
     ["project_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"tracing/spans",
     TracingSpansViewSet,
-    "environment_tracing_spans",
+    "project_tracing_spans",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"desktop_recordings",
     DesktopRecordingViewSet,
-    "environment_desktop_recordings",
+    "project_desktop_recordings",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"csp-reporting",
     CSPReportingViewSet,
-    "environment_csp_reporting",
+    "project_csp_reporting",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"marketing_analytics",
     marketing_analytics.MarketingAnalyticsViewSet,
-    "environment_marketing_analytics",
+    "project_marketing_analytics",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"revenue_analytics/taxonomy",
     revenue_analytics.RevenueAnalyticsTaxonomyViewSet,
-    "environment_revenue_analytics_taxonomy",
+    "project_revenue_analytics_taxonomy",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"revenue_analytics/joins",
     revenue_analytics.RevenueAnalyticsJoinViewSet,
-    "environment_revenue_analytics_joins",
+    "project_revenue_analytics_joins",
     ["team_id"],
 )
 
@@ -1508,157 +1563,157 @@ register_grandfathered_environment_nested_viewset(
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"evaluations",
     EvaluationViewSet,
-    "environment_evaluations",
+    "project_evaluations",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"taggers",
     TaggerViewSet,
-    "environment_taggers",
+    "project_taggers",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"evaluation_runs",
     EvaluationRunViewSet,
-    "environment_evaluation_runs",
+    "project_evaluation_runs",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/text_repr",
     LLMAnalyticsTextReprViewSet,
-    "environment_llm_analytics_text_repr",
+    "project_llm_analytics_text_repr",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/summarization",
     LLMAnalyticsSummarizationViewSet,
-    "environment_llm_analytics_summarization",
+    "project_llm_analytics_summarization",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/evaluation_summary",
     LLMEvaluationSummaryViewSet,
-    "environment_llm_analytics_evaluation_summary",
+    "project_llm_analytics_evaluation_summary",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/translate",
     LLMAnalyticsTranslateViewSet,
-    "environment_llm_analytics_translate",
+    "project_llm_analytics_translate",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/provider_keys",
     LLMProviderKeyViewSet,
-    "environment_llm_analytics_provider_keys",
+    "project_llm_analytics_provider_keys",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/provider_key_validations",
     LLMProviderKeyValidationViewSet,
-    "environment_llm_analytics_provider_key_validations",
+    "project_llm_analytics_provider_key_validations",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/models",
     LLMModelsViewSet,
-    "environment_llm_analytics_models",
+    "project_llm_analytics_models",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/evaluation_config",
     EvaluationConfigViewSet,
-    "environment_llm_analytics_evaluation_config",
+    "project_llm_analytics_evaluation_config",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/clustering_runs",
     LLMAnalyticsClusteringRunViewSet,
-    "environment_llm_analytics_clustering_runs",
+    "project_llm_analytics_clustering_runs",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/clustering_config",
     ClusteringConfigViewSet,
-    "environment_llm_analytics_clustering_config",
+    "project_llm_analytics_clustering_config",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/clustering_jobs",
     ClusteringJobViewSet,
-    "environment_llm_analytics_clustering_jobs",
+    "project_llm_analytics_clustering_jobs",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/sentiment",
     LLMAnalyticsSentimentViewSet,
-    "environment_llm_analytics_sentiment",
+    "project_llm_analytics_sentiment",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/offline_evaluations",
     LLMAnalyticsOfflineEvaluationsViewSet,
-    "environment_llm_analytics_offline_evaluations",
+    "project_llm_analytics_offline_evaluations",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/review_queue_items",
     ReviewQueueItemViewSet,
-    "environment_llm_analytics_review_queue_items",
+    "project_llm_analytics_review_queue_items",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/review_queues",
     ReviewQueueViewSet,
-    "environment_llm_analytics_review_queues",
+    "project_llm_analytics_review_queues",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/score_definitions",
     ScoreDefinitionViewSet,
-    "environment_llm_analytics_score_definitions",
+    "project_llm_analytics_score_definitions",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/trace_reviews",
     TraceReviewViewSet,
-    "environment_llm_analytics_trace_reviews",
+    "project_llm_analytics_trace_reviews",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"llm_analytics/evaluation_reports",
     EvaluationReportViewSet,
-    "environment_llm_analytics_evaluation_reports",
+    "project_llm_analytics_evaluation_reports",
     ["team_id"],
 )
 
-environment_vision_scanners_router = environments_router.register(
+project_vision_scanners_router, environment_vision_scanners_router = register_team_nested_viewset(
     r"vision/scanners",
     ReplayScannerViewSet,
-    "environment_vision_scanners",
+    "project_vision_scanners",
     ["team_id"],
 )
 environment_vision_scanners_router.register(
@@ -1667,51 +1722,57 @@ environment_vision_scanners_router.register(
     "environment_vision_scanner_observations",
     ["team_id", "scanner_id"],
 )
-environments_router.register(
+project_vision_scanners_router.register(
+    r"observations",
+    ReplayObservationViewSet,
+    "project_vision_scanner_observations",
+    ["team_id", "scanner_id"],
+)
+register_team_nested_viewset(
     r"vision/observations",
     SessionReplayObservationViewSet,
-    "environment_vision_observations",
+    "project_vision_observations",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"change_requests",
     approval_api.ChangeRequestViewSet,
-    "environment_change_requests",
+    "project_change_requests",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"approval_policies",
     approval_api.ApprovalPolicyViewSet,
-    "environment_approval_policies",
+    "project_approval_policies",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"core_events",
     CoreEventViewSet,
-    "environment_core_events",
+    "project_core_events",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"mcp_tools",
     MCPToolsViewSet,
-    "environment_mcp_tools",
+    "project_mcp_tools",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"mcp_servers",
     mcp_store.MCPServerViewSet,
-    "environment_mcp_servers",
+    "project_mcp_servers",
     ["team_id"],
 )
 
-environments_router.register(
+register_team_nested_viewset(
     r"mcp_server_installations",
     mcp_store.MCPServerInstallationViewSet,
-    "environment_mcp_server_installations",
+    "project_mcp_server_installations",
     ["team_id"],
 )
