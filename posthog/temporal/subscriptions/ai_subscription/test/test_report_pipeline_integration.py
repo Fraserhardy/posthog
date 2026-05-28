@@ -47,29 +47,27 @@ class TestAIReportPipelineIntegration(ClickhouseTestMixin, NonAtomicBaseTest):
         mock_chat.return_value.invoke.side_effect = _invoke
         return captured
 
+    # Combined into a single test method: NonAtomicBaseTest doesn't roll back Postgres state
+    # between test methods in the same class, so per-method org/membership creates collide.
+    # Two assertions in one test gives reliable isolation while keeping both flows covered.
     @patch(f"{_RP}._capture_report_quality")
     @patch(f"{_RP}.MaxChatOpenAI")
     @patch(f"{_RP}.build_enriched_prompt")
-    async def test_real_hogql_results_flow_into_synthesis(
+    async def test_real_hogql_flows_into_synthesis_and_invalid_hogql_degrades(
         self, mock_bep: MagicMock, mock_chat: MagicMock, mock_capture: MagicMock
     ) -> None:
+        # --- happy path: planned HogQL runs for real, results reach synthesis ---
         mock_bep.return_value = self._spec("SELECT event, count() AS c FROM events GROUP BY event ORDER BY c DESC")
         captured = self._capture_synthesis(mock_chat, "# Report")
 
         report = await generate_ai_report(team=self.team, user=self.user, prompt="how many events", window_days=7)
 
         assert report == "# Report"
-        # the planned query actually executed against ClickHouse and its results reached synthesis
         assert "$pageview" in captured["human"]
         assert "signed_up" in captured["human"]
 
-    @patch(f"{_RP}._capture_report_quality")
-    @patch(f"{_RP}.MaxChatOpenAI")
-    @patch(f"{_RP}.build_enriched_prompt")
-    async def test_invalid_hogql_degrades_but_report_still_ships(
-        self, mock_bep: MagicMock, mock_chat: MagicMock, mock_capture: MagicMock
-    ) -> None:
-        # the fix LLM (also MaxChatOpenAI) returns a non-HogQLFix, so the step can't recover and degrades
+        # --- degrade path: invalid query produces a placeholder but the report still ships ---
+        # fix LLM (also MaxChatOpenAI) returns a non-HogQLFix, so the step can't recover and degrades
         mock_chat.return_value.with_structured_output.return_value.invoke.return_value = "not a fix"
         mock_bep.return_value = self._spec("SELECT count() FROM a_table_that_does_not_exist")
         captured = self._capture_synthesis(mock_chat, "# Degraded report")

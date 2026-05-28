@@ -1,3 +1,6 @@
+import re
+from urllib.parse import urlparse
+
 import nh3
 import structlog
 from markdown_it import MarkdownIt
@@ -59,6 +62,35 @@ _ALLOWED_EMAIL_ATTRS = {"a": {"href", "title"}}
 # Slack's hard limit is 3000 chars per section block; keep margin for safety.
 SLACK_MRKDWN_SECTION_LIMIT = 2900
 
+# Only PostHog hosts are allowed in delivered report links. Any other host is stripped from
+# the LLM output before rendering — Slack auto-unfurls outbound links server-side, which is
+# an exfil channel an injected synthesis prompt could otherwise drive.
+_ALLOWED_LINK_HOSTS = {"posthog.com", "app.posthog.com", "eu.posthog.com", "us.posthog.com"}
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+_MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
+
+
+def _is_allowed_link_url(url: str) -> bool:
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except ValueError:
+        return False
+    if not host:
+        return False
+    return host in _ALLOWED_LINK_HOSTS or any(host.endswith("." + h) for h in _ALLOWED_LINK_HOSTS)
+
+
+def _strip_external_links_markdown(markdown: str) -> str:
+    """Drop markdown image syntax entirely; for `[text](url)`, keep links to PostHog hosts and
+    fall back to the bare text for any other host. Defends against an injected synthesis prompt
+    embedding an exfil URL that Slack would auto-unfurl."""
+    md = _MARKDOWN_IMAGE_RE.sub(lambda m: m.group(1) or "", markdown)
+    md = _MARKDOWN_LINK_RE.sub(
+        lambda m: m.group(0) if _is_allowed_link_url(m.group(2)) else m.group(1),
+        md,
+    )
+    return md
+
 
 def _split_text_into_chunks(text: str, limit: int = SLACK_MRKDWN_SECTION_LIMIT) -> list[str]:
     if len(text) <= limit:
@@ -98,7 +130,7 @@ async def generate_ai_subscription_markdown(subscription: Subscription) -> str:
 
 
 def render_ai_email_html(markdown: str) -> str:
-    rendered = _MARKDOWN_RENDERER.render(markdown)
+    rendered = _MARKDOWN_RENDERER.render(_strip_external_links_markdown(markdown))
     return nh3.clean(rendered, tags=_ALLOWED_EMAIL_TAGS, attributes=_ALLOWED_EMAIL_ATTRS)
 
 
@@ -162,7 +194,7 @@ def _resolve_slack_integration(subscription: Subscription) -> Integration:
 def _build_ai_slack_message(subscription: Subscription, markdown: str) -> SlackMessageData:
     utm_tags = f"{UTM_TAGS_BASE}&utm_medium=slack"
     channel = subscription.target_value.split("|")[0]
-    sections = _split_text_into_chunks(_SLACK_CONVERTER.convert(markdown))
+    sections = _split_text_into_chunks(_SLACK_CONVERTER.convert(_strip_external_links_markdown(markdown)))
     title = subscription.title or "Your PostHog AI report"
     first_section = sections[0] if sections else "_No report content was generated._"
 
