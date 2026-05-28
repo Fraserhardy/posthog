@@ -166,6 +166,7 @@ class Command(BaseCommand):
 
         updated = 0
         failed = 0
+        skipped = 0
 
         for start in range(0, len(affected_ids), batch_size):
             chunk_ids = affected_ids[start : start + batch_size]
@@ -204,7 +205,18 @@ class Command(BaseCommand):
                     new_secondary, secondary_changed = _dedupe_metrics(experiment.metrics_secondary or [], seen)
 
                     if not (primary_changed or secondary_changed):
-                        # Possible if rows changed between the SELECT and now.
+                        # Reached either because rows changed between the SELECT
+                        # and now, or because the only duplication is across two
+                        # saved metrics — which this command can't fix (it only
+                        # rewrites inline metrics, treating saved-metric uuids as
+                        # fixed points). Skip and warn so re-runs aren't expected
+                        # to drive the affected count to zero in that case.
+                        skipped += 1
+                        logger.warning(
+                            "experiment_metric_uuid_dedupe_skipped",
+                            experiment_id=experiment.id,
+                            reason="no_inline_change",
+                        )
                         continue
 
                     new_primary_uuids: set[str] = {uuid for m in new_primary if (uuid := m.get("uuid"))}
@@ -257,4 +269,5 @@ class Command(BaseCommand):
                     )
 
         verb = "Would update" if dry_run else "Updated"
-        self.stdout.write(f"{verb} {updated} experiments. {failed} failed.")
+        suffix = f" {skipped} skipped (saved-metric-only duplicates, not fixable here)." if skipped else ""
+        self.stdout.write(f"{verb} {updated} experiments. {failed} failed.{suffix}")
