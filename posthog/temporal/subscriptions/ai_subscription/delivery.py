@@ -66,7 +66,8 @@ SLACK_MRKDWN_SECTION_LIMIT = 2900
 # the LLM output before rendering — Slack auto-unfurls outbound links server-side, which is
 # an exfil channel an injected synthesis prompt could otherwise drive.
 _ALLOWED_LINK_HOSTS = {"posthog.com", "app.posthog.com", "eu.posthog.com", "us.posthog.com"}
-_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+# URL group supports one level of balanced parens so e.g. wikipedia /Foo_(bar) doesn't truncate
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]*)\]\(((?:[^()\s]+|\([^)]*\))+)(?:\s+\"[^\"]*\")?\)")
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
 
 

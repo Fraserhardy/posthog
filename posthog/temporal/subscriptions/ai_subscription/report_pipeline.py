@@ -141,7 +141,10 @@ async def _synthesize(
         billable=True,
         posthog_properties=posthog_properties,
     )
-    synthesis_prompt = resolve_prompt(team, SYNTHESIS_PROMPT_NAME, AI_SUBSCRIPTION_SYNTHESIS_PROMPT)
+    # resolve_prompt is sync and may hit the DB on a hypercache miss; keep it off the event loop
+    synthesis_prompt = await database_sync_to_async(resolve_prompt, thread_sensitive=False)(
+        team, SYNTHESIS_PROMPT_NAME, AI_SUBSCRIPTION_SYNTHESIS_PROMPT
+    )
 
     try:
         # database_sync_to_async (not to_thread): MaxChatOpenAI reads billing/quota from the ORM
@@ -195,7 +198,7 @@ async def _run_steps(
                 return (f"### {safe_description}\n\n{safe_formatted}", True)
             except Exception as exc:
                 last_exc = exc
-                if attempt >= _MAX_QUERY_FIX_RETRIES or not _is_retryable_query_error(exc):
+                if attempt >= _MAX_QUERY_FIX_RETRIES or not isinstance(exc, _RETRYABLE_QUERY_ERRORS):
                     break
                 logger.info(
                     "ai_report.query_fix_attempt",
@@ -236,10 +239,6 @@ async def _run_steps(
     return rendered, failed_count
 
 
-def _is_retryable_query_error(exc: BaseException) -> bool:
-    return isinstance(exc, _RETRYABLE_QUERY_ERRORS)
-
-
 async def _arequest_hogql_fix(
     *,
     original_hogql: str,
@@ -267,7 +266,9 @@ async def _arequest_hogql_fix(
         "error": error_message,
         "original_hogql": original_hogql,
     }
-    fix_prompt = resolve_prompt(team, HOGQL_FIX_PROMPT_NAME, HOGQL_FIX_PROMPT)
+    fix_prompt = await database_sync_to_async(resolve_prompt, thread_sensitive=False)(
+        team, HOGQL_FIX_PROMPT_NAME, HOGQL_FIX_PROMPT
+    )
     rendered = re.sub(
         r"\{\{\{(\w+)\}\}\}",
         lambda m: substitutions.get(m.group(1), m.group(0)),
