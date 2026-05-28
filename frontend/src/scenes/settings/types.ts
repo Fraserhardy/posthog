@@ -157,6 +157,7 @@ export type SettingId =
     | 'environment-delete'
     | 'project-delete'
     | 'project-move'
+    | 'organization-admin-notice'
     | 'organization-display-name'
     | 'organization-integrations-list'
     | 'organization-oauth-apps-list'
