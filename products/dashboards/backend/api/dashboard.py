@@ -967,7 +967,6 @@ class DashboardSerializer(DashboardMetadataSerializer):
         """Re-run FileSystem sync for insights whose ``deleted`` flag was changed via bulk update."""
         # The default Insight manager excludes deleted=True, so use the unfiltered manager —
         # this helper is invoked specifically after bulk deletes/undeletes and must see both.
-        # nosemgrep: idor-lookup-without-team (caller passed a team-scoped id list)
         insights = Insight.objects_including_soft_deleted.filter(id__in=insight_ids, team_id=team_id).select_related(
             "team"
         )
