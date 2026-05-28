@@ -927,6 +927,44 @@ def _fix_pydantic_schema_for_openapi(schema):
     return schema
 
 
+def _recover_pydantic_schema(name: str) -> dict | None:
+    """
+    Recover the proper JSON schema for a Pydantic model from `posthog.schema`
+    when drf-spectacular's emission collapsed to a self-reference.
+
+    The Pydantic-emitted schema follows JSON Schema 2020-12, which is compatible
+    with OpenAPI 3.1. We strip the `$defs` block (those classes are already
+    emitted as components by drf-spectacular) and rewrite any `$ref` paths from
+    `#/$defs/...` to `#/components/schemas/...` so refs resolve in the OpenAPI
+    document.
+    """
+    try:
+        import posthog.schema as schema_module
+    except ImportError:
+        return None
+    cls = getattr(schema_module, name, None)
+    if cls is None or not hasattr(cls, "model_json_schema"):
+        return None
+    try:
+        pyd_schema = cls.model_json_schema(ref_template="#/components/schemas/{model}")
+    except Exception:
+        return None
+    # Pydantic emits recursive models as {"$ref": "#/.../Self", "$defs": {...}} where
+    # the actual definition is nested under $defs. Unwrap when that's the case.
+    defs = pyd_schema.pop("$defs", None) or pyd_schema.pop("definitions", None)
+    if defs and pyd_schema.get("$ref") == f"#/components/schemas/{name}" and name in defs:
+        return defs[name]
+    if defs and list(pyd_schema.keys()) == ["$ref"]:
+        # Top-level was a ref into $defs under a different name — try to follow it
+        ref = pyd_schema["$ref"]
+        if ref.startswith("#/components/schemas/"):
+            inner = ref.removeprefix("#/components/schemas/")
+            if inner in defs:
+                return defs[inner]
+        return None
+    return pyd_schema
+
+
 def lint_spec_consistency_hook(result, generator, request, public):
     """Postprocessing hook that emits drf-spectacular warnings for spec self-inconsistencies.
 
@@ -1156,10 +1194,22 @@ def custom_postprocessing_hook(result, generator, request, public):
             paths[path][method] = definition
 
     # Apply OpenAPI 3.1 schema cleanup to all component schemas.
+    #
+    # Workaround for a drf-spectacular emission bug: when the same recursive
+    # Pydantic model is referenced from multiple operations (e.g. dual-registered
+    # endpoints exposing the same request body), spectacular sometimes emits the
+    # top-level definition of the recursive schema as `{"$ref": "#/components/schemas/Self"}`
+    # — a schema whose definition points to itself. Detect this and recover the
+    # proper definition by asking Pydantic directly.
     if "components" in result and "schemas" in result["components"]:
-        result["components"]["schemas"] = {
-            name: _fix_pydantic_schema_for_openapi(schema) for name, schema in result["components"]["schemas"].items()
-        }
+        cleaned_schemas = {}
+        for name, schema in result["components"]["schemas"].items():
+            cleaned = _fix_pydantic_schema_for_openapi(schema)
+            if cleaned == {"$ref": f"#/components/schemas/{name}"}:
+                recovered = _recover_pydantic_schema(name)
+                cleaned = recovered if recovered is not None else schema
+            cleaned_schemas[name] = cleaned
+        result["components"]["schemas"] = cleaned_schemas
 
     # Apply the same cleanup to parameter, requestBody, and response schemas at the operation
     # level — single-entry allOf wrappers and vestigial bounds also surface there.  Today

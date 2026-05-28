@@ -162,7 +162,7 @@ const approvalPoliciesList = (): ToolBase<typeof ApprovalPoliciesListSchema, Sch
         const projectId = await context.stateManager.getProjectId()
         const result = await context.api.request<Schemas.PaginatedApprovalPolicyList>({
             method: 'GET',
-            path: `/api/environments/${encodeURIComponent(String(projectId))}/approval_policies/`,
+            path: `/api/projects/${encodeURIComponent(String(projectId))}/approval_policies/`,
             query: {
                 limit: params.limit,
                 offset: params.offset,
@@ -181,7 +181,7 @@ const approvalPolicyGet = (): ToolBase<typeof ApprovalPolicyGetSchema, Schemas.A
         const projectId = await context.stateManager.getProjectId()
         const result = await context.api.request<Schemas.ApprovalPolicy>({
             method: 'GET',
-            path: `/api/environments/${encodeURIComponent(String(projectId))}/approval_policies/${encodeURIComponent(String(params.id))}/`,
+            path: `/api/projects/${encodeURIComponent(String(projectId))}/approval_policies/${encodeURIComponent(String(params.id))}/`,
         })
         return result
     },
@@ -196,7 +196,7 @@ const changeRequestGet = (): ToolBase<typeof ChangeRequestGetSchema, Schemas.Cha
         const projectId = await context.stateManager.getProjectId()
         const result = await context.api.request<Schemas.ChangeRequest>({
             method: 'GET',
-            path: `/api/environments/${encodeURIComponent(String(projectId))}/change_requests/${encodeURIComponent(String(params.id))}/`,
+            path: `/api/projects/${encodeURIComponent(String(projectId))}/change_requests/${encodeURIComponent(String(params.id))}/`,
         })
         return result
     },
@@ -211,7 +211,7 @@ const changeRequestsList = (): ToolBase<typeof ChangeRequestsListSchema, Schemas
         const projectId = await context.stateManager.getProjectId()
         const result = await context.api.request<Schemas.PaginatedChangeRequestList>({
             method: 'GET',
-            path: `/api/environments/${encodeURIComponent(String(projectId))}/change_requests/`,
+            path: `/api/projects/${encodeURIComponent(String(projectId))}/change_requests/`,
             query: {
                 action_key: params.action_key,
                 limit: params.limit,
