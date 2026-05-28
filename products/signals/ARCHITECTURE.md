@@ -303,14 +303,18 @@ The coordinator's lifetime is seconds regardless of fan-out width; throttling ha
 Child workflow per planned run. Defined in `backend/temporal/agentic/scout_scheduler.py`.
 
 Thin wrapper around `run_signals_scout_activity`, which delegates to
-`scout_harness.runner.arun_signals_scout`. The activity owns the `SignalScoutRun` row
-lifecycle (insert at start, finalize on completion or failure). The workflow's only
+`scout_harness.runner.arun_signals_scout`. The activity inserts the `SignalScoutRun`
+bridge row at the start of the run; status, timing, and chat log live on the linked
+`tasks.TaskRun` via `MultiTurnSession`, not on the bridge row. The workflow's only
 job is to spawn the activity with `start_to_close_timeout=WORKFLOW_HARD_CEILING_S`,
 a 2-minute heartbeat, and `RetryPolicy(maximum_attempts=1)` — the spec calls for "fail
 safe and silent": a bad run does not retry blindly; the next scheduled tick will try
-again. A partial unique constraint on `(team, skill_name) WHERE status='running'`
-in the runner is the single-flight guard against tick-over-tick collisions; an
-`IntegrityError` there becomes a clean `skip_reason="already_running"` outcome.
+again. Single-flight is a best-effort app-layer guard: `_has_running_run` skips
+dispatch when a prior run for the same `(team, skill_name)` has
+`task_run.status = IN_PROGRESS`. An earlier partial unique constraint on
+`(team, skill_name) WHERE status='running'` was dropped together with the bridge
+model's own status column; active recovery of stranded `IN_PROGRESS` task runs
+(`_self_heal_stale_runs` is a no-op today) is a tracked follow-up.
 
 Findings emitted during the run go through the harness's `emit_signal_*` tools,
 which call `emit_signal()` with `source_product="signals_scout"` and
@@ -318,7 +322,7 @@ which call `emit_signal()` with `source_product="signals_scout"` and
 emitter → buffer → grouping v2 path as any other source.
 
 See `backend/scout_harness/AGENTS.md` for the harness internals (runner, prompt
-assembly, tool registry, memory + profile + run-history reads, lazy seed) and
+assembly, scratchpad + profile + run-history reads, lazy seed) and
 `skills/AGENTS.md` for the scout fleet convention.
 
 ---
@@ -498,47 +502,42 @@ Per-team binding for the headless **Signals agent**. One row per team. The agent
 
 ### `SignalScoutRun`
 
-Run diary — one row per scheduled agent run. Holds per-run summary, structured findings, hypotheses considered, run metrics, and arbitrary metadata.
+Thin bridge from a Tasks `TaskRun` to the scout skill that ran inside it. Mirrors `SignalReportTask` (the bridge used by the SignalReport research flow): one scout-domain row per scheduled agent run that links its `TaskRun` to the skill it executed. Status, timing, error context, and the full chat log live on the `TaskRun`; emitted findings are `Signal` / `SignalReport` rows written by `emit_signal()`. This row carries only the scout-specific fields that need to be queryable as real columns.
 
-Status machine: `scheduled → running → {completed, failed, abandoned}`.
+| Field           | Type                              | Description                                                                                                                                                        |
+| --------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `team`          | FK → Team                         | Owning team (`related_name="signal_scout_runs"`). Denormalised tenant boundary; canonical value is `task_run.task.team`.                                           |
+| `task_run`      | OneToOne → tasks.TaskRun          | The `TaskRun` the scout span ran inside (`related_name="signal_scout_run"`, CASCADE — bridge row goes when the `TaskRun` is purged).                               |
+| `scout_config`  | FK → SignalScoutConfig (SET_NULL) | Audit pointer; `SET_NULL` so deleting and recreating a config doesn't destroy run history.                                                                         |
+| `skill_name`    | CharField(200)                    | The `signals-scout-*` skill the run executed.                                                                                                                      |
+| `skill_version` | Int                               | The `LLMSkill.version` snapshot at run start.                                                                                                                      |
+| `summary`       | TextField                         | One-paragraph close-out the agent writes at end-of-run. Searchable via ILIKE on the list endpoint so future runs can dedupe even when no `Signal` row was emitted. |
+| `created_at`    | DateTime                          | Auto-set on creation.                                                                                                                                              |
 
-| Field                   | Type                              | Description                                                                                                                                                                                                                                             |
-| ----------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `team`                  | FK → Team                         | Owning team (`related_name="signal_scout_runs"`)                                                                                                                                                                                                        |
-| `scout_config`          | FK → SignalScoutConfig (SET_NULL) | Audit pointer; `SET_NULL` so deleting and recreating a config doesn't destroy run history                                                                                                                                                               |
-| `skill_name`            | CharField(200)                    | The `signals-scout-*` skill the run executed                                                                                                                                                                                                            |
-| `skill_version`         | Int                               | The `LLMSkill.version` snapshot at run start                                                                                                                                                                                                            |
-| `status`                | CharField                         | `scheduled` / `running` / `completed` / `failed` / `abandoned`                                                                                                                                                                                          |
-| `started_at`            | DateTime                          | Auto-set on creation                                                                                                                                                                                                                                    |
-| `completed_at`          | DateTime (nullable)               | Set at finalize                                                                                                                                                                                                                                         |
-| `summary`               | TextField                         | Prose: what the agent looked at, what it found, what it skipped. Used by future runs for best-effort dedupe via ILIKE search.                                                                                                                           |
-| `findings`              | JSONField (list)                  | Structured findings emitted via `emit_signal_*` during the run                                                                                                                                                                                          |
-| `hypotheses_considered` | JSONField (list)                  | Hypotheses the agent weighed (including ones it decided not to chase) with reasoning                                                                                                                                                                    |
-| `run_metrics`           | JSONField (dict)                  | Measured run quantities, e.g. `{"runtime_s": float, "findings": int}`. Token / cost data arrives later via the LLM analytics join — see `metadata.task_run_id`.                                                                                         |
-| `metadata`              | JSONField (dict)                  | Per-run snapshot. `limits` / `skill_id` / `allowed_tools` set at row creation; `task_id` + `task_run_id` written immediately after `MultiTurnSession.start()` returns so the Tasks UI cross-link is queryable mid-run and survives both finalize paths. |
+**Status, timing, and chat log live on the linked `TaskRun`.** The bridge row carries no `status` / `started_at` / `completed_at` / `findings` / `run_metrics` / `metadata` of its own — those moved to `tasks.TaskRun` so the LLM-analytics token / cost roll-up, the Tasks UI, and the harness all see one canonical record. `MultiTurnSession` owns the `TaskRun` lifecycle; the `on_task_run_created` hook attaches the `TaskRun` to the bridge row before the agent's first turn.
 
-**Tasks UI cross-link.** `metadata.task_id` and `metadata.task_run_id` together render the deep-link `/project/{team_id}/tasks/{task_id}?runId={task_run_id}` — surfaced as the computed `task_url` field on both `signals-scout-runs-list` and `signals-scout-runs-retrieve` MCP responses. `task_url` is `null` when either ID is missing (rows predating the linkage capture, or runs that aborted before `MultiTurnSession.start()` returned).
+**Tasks UI cross-link.** Run serializers expose a computed `task_url` field on `signals-scout-runs-list` and `signals-scout-runs-retrieve` MCP responses — `/project/{team_id}/tasks/{task_run.task_id}?runId={task_run_id}`. `task_url` is `null` for rows whose `task_run` link is missing (rows aborted before `MultiTurnSession.start()` returned).
 
-**Indexes:** `(team, -started_at)`, `(team, status)`
+**Indexes:** `(team, skill_name)`.
 
-**Constraints:** Partial unique on `(team, skill_name) WHERE status='running'` — closes the TOCTOU window between the runner's `_has_running_run` check and the row insert. Two coordinator children dispatched in parallel for the same `(team, skill)` could both pass the check; the DB rejects the second INSERT with `IntegrityError`, which the runner translates into a clean skip with `skip_reason="already_running"`. Terminal states can stack freely.
+**Constraints:** None at the DB level today. Single-flight is a best-effort app-layer guard (`_has_running_run` against `task_run.status = IN_PROGRESS`). An earlier partial unique constraint on `(team, skill_name) WHERE status='running'` was dropped together with the bridge model's own status column; a `task_run.status`-based constraint plus active recovery of stranded `IN_PROGRESS` task runs (`_self_heal_stale_runs` is a no-op today) is a tracked follow-up.
 
 ### `SignalScratchpad`
 
-Durable learnings the agent reads in future runs (known issues, false positives, team steering). Distinct from `SignalProjectProfile`: profile is _deterministic ground truth_, memory is the _agent's inferred learnings_ (possibly wrong, TTL'd).
+Narrow per-team scratchpad surface the scout fleet writes during runs and reads back on future runs (known issues, false positives, dedupe fingerprints, learned team quirks). Distinct from `SignalProjectProfile`: profile is _deterministic ground truth_, scratchpad is the _scout's inferred learnings_ (possibly wrong). MCP-readable across agents so PostHog AI and other scouts can see what the fleet has learned about a team.
 
-| Field            | Type                           | Description                                                                                  |
-| ---------------- | ------------------------------ | -------------------------------------------------------------------------------------------- |
-| `team`           | FK → Team                      | Owning team (`related_name="signal_memories"`)                                               |
-| `key`            | CharField(300)                 | Semantic key, agent-chosen; unique per team                                                  |
-| `content`        | TextField                      | Prose for prompt injection — the agent reads this verbatim                                   |
-| `authority`      | CharField                      | `agent_inference` (default) or `human_confirmed`                                             |
-| `tags`           | ArrayField                     | Agent-chosen tags for filtering at prompt-assembly time                                      |
-| `created_by_run` | FK → SignalScoutRun (SET_NULL) | `null` = human-authored; agent-written entries point back to the run that created them       |
-| `expires_at`     | DateTime (nullable)            | Soft TTL — `null` = no expiry (only allowed for `human_confirmed` entries; harness enforces) |
+| Field            | Type                           | Description                                                                               |
+| ---------------- | ------------------------------ | ----------------------------------------------------------------------------------------- |
+| `team`           | FK → Team                      | Owning team (`related_name="signal_scratchpads"`)                                         |
+| `key`            | CharField(300)                 | Semantic key, agent-chosen; unique per team                                               |
+| `content`        | TextField                      | Prose for prompt injection — the agent reads this verbatim                                |
+| `created_by_run` | FK → SignalScoutRun (SET_NULL) | The run that wrote this entry; `SET_NULL` so deleting a run row doesn't destroy the entry |
+| `created_at`     | DateTime                       | Auto-set on creation                                                                      |
+| `updated_at`     | DateTime                       | Auto-set on save                                                                          |
 
-**Constraints:** Unique on `(team, key)`
-**Indexes:** `(team, expires_at)`, GIN on `tags`
+**Constraints:** Unique on `(team, key)`.
+
+`authority`, `tags`, and `expires_at` (with their backing GIN / expiry indexes) were dropped in the PR2 review simplification — retrieval is now plain ILIKE over `key` + `content`, and every entry is durable per-team scratchpad.
 
 ### `SignalProjectProfile`
 
@@ -1084,18 +1083,18 @@ products/signals/
 │   │   ├── AGENTS.md
 │   │   ├── __init__.py              # Public re-exports (RunLimits, LoadedSkill, sync helpers, …)
 │   │   ├── runner.py                # Per-run entrypoint; owns SignalScoutRun lifecycle + sandbox loop
-│   │   ├── prompt.py                # System prompt assembly (skill + memory + profile + run history)
+│   │   ├── prompt.py                # System prompt assembly (skill + scratchpad + profile + run history)
 │   │   ├── skill_loader.py          # Resolves signals-scout-* LLMSkill rows for a run
 │   │   ├── lazy_seed.py             # Canonical SKILL.md → LLMSkill sync (sync_canonical_skills)
-│   │   ├── tool_registry.py         # HARNESS_INTERNAL_TOOLS + allowed_tools resolution
 │   │   ├── limits.py                # RunLimits + DEFAULT_LIMITS + WORKFLOW_HARD_CEILING_S
-│   │   ├── serializers.py           # DRF serializers for runs / memory / project profile
+│   │   ├── serializers.py           # DRF serializers for runs / scratchpad / project profile
 │   │   ├── views.py                 # SignalScoutRunViewSet, SignalScratchpadViewSet, SignalProjectProfileViewSet
 │   │   ├── profile/
-│   │   │   └── builders.py          # Deterministic builders for SignalProjectProfile inventory (10 sections)
+│   │   │   ├── builders.py          # Deterministic builders for SignalProjectProfile inventory
+│   │   │   └── schema.py            # Dataclasses for the inventory payload shape
 │   │   └── tools/                   # Harness-internal tools the agent calls inside a run
 │   │       ├── emit.py              # emit_signal_* — pushes findings as cross_source_issue signals
-│   │       ├── memory.py            # memory_* — read/write/delete SignalScratchpad
+│   │       ├── scratchpad.py        # remember / forget / search_scratchpad — read/write/delete SignalScratchpad
 │   │       ├── profile.py           # project_profile_* — read SignalProjectProfile snapshot
 │   │       └── runs.py              # runs_* — read past SignalScoutRun rows for dedupe
 │   ├── github_issues/               # Placeholder directory
@@ -1146,11 +1145,14 @@ products/signals/
 │   │   ├── 0014_signalreportartefact_report_type_idx.py
 │   │   ├── 0015_alter_signalsourceconfig_source_product_and_more.py
 │   │   ├── 0016_signalautonomyconfig_alter_signalreportartefact_type.py  # SignalTeamConfig, SignalUserAutonomyConfig, SignalReportTask
-│   │   ├── 0017_add_signals_scout_source.py        # cross_source_issue source variant
-│   │   ├── 0018_add_signal_scout_models.py         # SignalScoutConfig, SignalScoutRun, SignalScratchpad
-│   │   ├── 0019_signalprojectprofile.py            # SignalProjectProfile
-│   │   ├── 0020_signalscoutconfig_runs_per_tick.py # Per-team N-of-M sampling control
-│   │   └── 0021_signalscoutrun_signal_scout_run_one_running_per_team_skill.py  # Partial unique constraint (single-flight guard)
+│   │   ├── 0017_add_resolved_signal_report_status.py
+│   │   ├── 0018_alter_signalreportartefact_type.py
+│   │   ├── 0019_alter_signalsourceconfig_source_product_and_more.py
+│   │   ├── 0020_signaluserautonomyconfig_slack_notification_fields.py
+│   │   ├── 0021_add_signals_scout_source.py        # cross_source_issue source variant
+│   │   ├── 0022_add_signal_scout_models.py         # SignalScoutConfig, SignalScoutRun, SignalScratchpad
+│   │   ├── 0023_signalprojectprofile.py            # SignalProjectProfile
+│   │   └── 0024_signalscoutconfig_runs_per_tick.py # Per-team N-of-M sampling control
 │   └── temporal/
 │       ├── __init__.py              # Registers Signals workflows and activities
 │       ├── agentic/
@@ -1179,11 +1181,13 @@ products/signals/
 │   ├── AGENTS.md
 │   ├── signals/                     # Official PostHog skill (published via posthog_ai/dist): querying signals data
 │   ├── inbox-exploration/           # Official PostHog skill (published via posthog_ai/dist): browsing the inbox
-│   ├── signals-scout-general/       # Scout fleet: cross-product generalist (12 lenses + 4 references)
+│   ├── signals-scout-general/       # Scout fleet: cross-product generalist (SKILL.md + emit.md + conventions.md)
 │   ├── signals-scout-llm-analytics/ # Scout fleet: LLM analytics anomaly watcher
 │   ├── signals-scout-logs/          # Scout fleet: logs anomaly watcher
 │   ├── signals-scout-error-tracking/         # Scout fleet: error tracking anomaly watcher
 │   ├── signals-scout-revenue-analytics/      # Scout fleet: revenue anomaly watcher
-│   └── signals-scout-observability-gaps/     # Scout fleet: structural-gap watcher (P3 recommendations)
+│   ├── signals-scout-surveys/                # Scout fleet: surveys anomaly + theme-aggregation watcher
+│   ├── signals-scout-observability-gaps/     # Scout fleet: structural-gap watcher (P3 recommendations)
+│   └── signals-scout-csp-violations/         # Scout fleet: CSP violation watcher
 └── frontend/                        # Frontend components (not covered here)
 ```

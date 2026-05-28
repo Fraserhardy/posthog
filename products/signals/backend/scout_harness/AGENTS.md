@@ -1,8 +1,8 @@
 # Signals Agent Harness
 
 This directory contains the headless **Signals agent** — a scheduled scout that explores
-a project, writes durable memory across runs, and emits findings into the Signals inbox
-via `emit_signal()` using the `signals_scout` source variant.
+a project, writes durable scratchpad entries across runs, and emits findings into the
+Signals inbox via `emit_signal()` using the `signals_scout` source variant.
 
 It is the second agentic surface in Signals. The other one — `report_generation/` — runs
 on demand when a `SignalReport` is promoted to `candidate` and produces a single research
@@ -23,9 +23,9 @@ management command (see `../management/AGENTS.md`).
   and returns a `RunResult`. The activity wrapper in `temporal/agentic/scout_scheduler.py`
   delegates straight to this.
 - `prompt.py`
-  Assembles the system prompt: persona + skill body + relevant memory + project profile
-  inventory + recent run summaries. Memory and run history are filtered by skill so a
-  specialist only sees its own past work.
+  Assembles the system prompt: persona + skill body + relevant scratchpad entries +
+  project profile inventory + recent run summaries. Scratchpad and run history are
+  filtered by skill so a specialist only sees its own past work.
 - `skill_loader.py`
   Resolves `signals-scout-*` skills from the team's `LLMSkill` rows. Defines
   `SIGNALS_SCOUT_SKILL_PREFIX` and `LoadedSkill` (body + version + allowed_tools).
@@ -35,16 +35,15 @@ management command (see `../management/AGENTS.md`).
   ones the team hasn't edited, leaves diverged rows alone, tombstones rows whose
   canonical skill was deleted, backfills metadata. Called both lazily (coordinator tick,
   runner cold-start) and explicitly via the `sync_signals_scout_skills` management command.
-- `tool_registry.py`
-  Declares `HARNESS_INTERNAL_TOOLS` (the harness-owned tools: emit, memory, profile,
-  runs) and resolves the effective toolset for a run by intersecting the skill's
-  `allowed_tools` with what the harness actually exposes. Validates tool names so a
-  typo in a SKILL.md fails loudly.
 - `tools/`
-  Implementations of the four harness-internal tools the agent calls during a run:
+  Implementations of the four harness-internal tools the agent calls during a run.
+  The effective toolset for a run is the intersection of the skill's `allowed_tools`
+  list with what `tools/__init__.py` re-exports — there is no separate registry
+  module today.
   - `emit.py` — `emit_signal_*` tools that push findings as `cross_source_issue`
     signals into the standard ingestion pipeline.
-  - `memory.py` — `memory_*` tools (read/write/delete) backed by the `SignalScratchpad` model.
+  - `scratchpad.py` — `remember`, `forget`, and `search_scratchpad` tools backed by
+    the `SignalScratchpad` model.
   - `profile.py` — `project_profile_*` tools that read the deterministic
     `SignalProjectProfile` snapshot.
   - `runs.py` — `runs_*` tools that read past `SignalScoutRun` rows for dedupe and
@@ -69,7 +68,7 @@ management command (see `../management/AGENTS.md`).
   `start_to_close_timeout`), and `resolve_limits()` which folds per-team
   `SignalScoutConfig.limit_overrides` over the harness defaults.
 - `serializers.py`
-  DRF serializers for the harness HTTP surface (runs, memory, project profile).
+  DRF serializers for the harness HTTP surface (runs, scratchpad, project profile).
   Annotated for drf-spectacular so the generated MCP tools have informative schemas.
 - `views.py`
   `SignalScoutRunViewSet`, `SignalScratchpadViewSet`, `SignalProjectProfileViewSet`.
@@ -102,10 +101,10 @@ one sandbox session → zero or more emitted signals.
   with `source_product="signals_scout"` and `source_type="cross_source_issue"`.
   From there the signal flows through the same emitter → buffer → grouping v2 path
   as any other source.
-- Memory and run history are read at prompt assembly time. The agent can also write
-  memory mid-run via the `memory_*` tools — that's how a specialist with no anomalies
-  to chase records "no LLM activity here, close out fast" so future runs of the
-  same skill short-circuit cold.
+- Scratchpad entries and run history are read at prompt assembly time. The agent can
+  also write scratchpad entries mid-run via `remember` / `forget` — that's how a
+  specialist with no anomalies to chase records "no LLM activity here, close out
+  fast" so future runs of the same skill short-circuit cold.
 
 ## Where the rest of the system meets this directory
 
@@ -118,7 +117,7 @@ one sandbox session → zero or more emitted signals.
 - **Source variant** — `SignalSourceConfig.SourceProduct.SIGNALS_SCOUT` paired with
   `SourceType.CROSS_SOURCE_ISSUE`.
 - **Scout fleet** — the `signals-scout-*` skills live at
-  `../../skills/signals-scout-*/` (generalist + 5 specialists). See
+  `../../skills/signals-scout-*/` (generalist + 7 specialists). See
   `../../skills/AGENTS.md` for the fleet convention.
 - **Local commands** — `run_signals_scout` (one-shot run) and
   `sync_signals_scout_skills` (force a canonical-skill sync). Both documented in
@@ -128,9 +127,9 @@ one sandbox session → zero or more emitted signals.
 
 - Keep the harness loop generic. Skill-specific logic belongs in the SKILL.md of the
   scout, not in `runner.py` or `prompt.py`.
-- New harness-internal tools: register in `tool_registry.HARNESS_INTERNAL_TOOLS` and
-  add a corresponding scope check on the viewset in `views.py` so the MCP surface
-  and the sandbox surface stay aligned.
+- New harness-internal tools: add the implementation under `tools/`, re-export it
+  from `tools/__init__.py`, and add a corresponding scope check on the viewset in
+  `views.py` so the MCP surface and the sandbox surface stay aligned.
 - If you change the canonical SKILL.md format or directory layout, update
   `lazy_seed.discover_canonical_skills()` and the parser tests — the coordinator
   call to `sync_canonical_skills()` runs on every tick and silently swallows parser
