@@ -1,0 +1,72 @@
+rules:
+    - id: no-environments-api-urls-frontend
+      message: |
+          Hand-coded `/api/environments/...` URL in product frontend code. The
+          canonical path is `/api/projects/:team_id/...`; `/api/environments/`
+          is a backward-compat alias that's auto-marked `deprecated: true` in
+          the OpenAPI schema and skipped by Orval's TypeScript codegen.
+
+          Prefer one of:
+            • the generated client function — see `/products/<product>/frontend/generated/api.ts`
+              (run `hogli product:maturity --codegen <product>` for the suggested function)
+            • a literal `/api/projects/${teamId}/...` URL with one of the
+              `currentTeamIdStrict` / `currentProjectIdStrict` selectors
+
+          A handful of legacy files are listed under `paths.exclude` below as the
+          existing migration backlog — when you migrate one of them, remove it
+          from the list so the rule gates regressions there too. The list should
+          only shrink over time.
+
+          If a specific call genuinely has to stay on the env path (e.g. the
+          backend hasn't migrated yet — `persons/properties` is one such case),
+          add `// nosemgrep: no-environments-api-urls-frontend` above the line
+          with a short comment explaining why.
+      severity: ERROR
+      languages: [typescript, javascript]
+      paths:
+          include:
+              - 'frontend/'
+              - 'products/*/frontend/'
+          exclude:
+              # tests, fixtures, and stories legitimately exercise env URLs to
+              # match what the calling logic currently constructs
+              - '**/*.test.ts'
+              - '**/*.test.tsx'
+              - '**/*.spec.ts'
+              - '**/*.spec.tsx'
+              - '**/test/**'
+              - '**/__tests__/**'
+              - '**/testUtils.ts'
+              - '**/testUtils.tsx'
+              - '**/*.stories.tsx'
+              - '**/*.stories.ts'
+              - '**/__mocks__/**'
+              - '**/mocks/**'
+              # codegen output mirrors the OpenAPI schema (which still has env paths)
+              - '**/generated/**'
+              # toolbar runs in third-party page context — separate concern
+              - '/frontend/src/toolbar/'
+              # --- Migration backlog: shrink this list as files migrate ---
+              # Each file below still constructs hand-coded /api/environments/
+              # URLs. Removing a file from this list re-enables the gate for it.
+              - '/frontend/src/lib/readOnlyGuard.ts'
+              - '/frontend/src/scenes/audit-logs/ExportsListHelpers.tsx'
+              - '/frontend/src/scenes/feature-flags/defaultEvaluationContextsLogic.ts'
+              - '/frontend/src/scenes/feature-flags/defaultReleaseConditionsLogic.ts'
+              - '/frontend/src/scenes/heatmaps/scenes/heatmap/heatmapLogic.ts'
+              - '/products/error_tracking/frontend/scenes/ErrorTrackingScene/ErrorTrackingScene.tsx'
+              - '/products/llm_analytics/frontend/evaluations/llmEvaluationLogic.ts'
+              - '/products/llm_analytics/frontend/evaluations/llmEvaluationsLogic.ts'
+              - '/products/llm_analytics/frontend/playground/llmPlaygroundModelLogic.ts'
+              - '/products/llm_analytics/frontend/playground/llmPlaygroundPromptsLogic.ts'
+              - '/products/llm_analytics/frontend/settings/llmProviderKeysLogic.ts'
+              - '/products/llm_analytics/frontend/tags/llmTaggerLogic.ts'
+              - '/products/llm_analytics/frontend/traceReviews/traceReviewsApi.ts'
+              - '/products/mcp_store/frontend/scene/ServerDetailPanel.tsx'
+              - '/products/replay_vision/frontend/replay_scanners/replayScannersLogic.ts'
+              - '/products/workflows/frontend/OptOuts/customerIOImportLogic.ts'
+      pattern-regex: '/api/environments/'
+      metadata:
+          category: best-practice
+          subcategory:
+              - audit
