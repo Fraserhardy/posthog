@@ -11,7 +11,7 @@ import { apiMutator } from '../../../../frontend/src/lib/api-orval-mutator'
 import type { AppMetricsResponseApi, AppMetricsTotalsResponseApi } from './api.schemas'
 
 export const getEventFilterMetricsRetrieveUrl = (projectId: string) => {
-    return `/api/environments/${projectId}/event_filter/metrics/`
+    return `/api/projects/${projectId}/event_filter/metrics/`
 }
 
 /**
@@ -32,7 +32,7 @@ export const eventFilterMetricsRetrieve = async (
 }
 
 export const getEventFilterMetricsTotalsRetrieveUrl = (projectId: string) => {
-    return `/api/environments/${projectId}/event_filter/metrics/totals/`
+    return `/api/projects/${projectId}/event_filter/metrics/totals/`
 }
 
 /**
