@@ -117,6 +117,8 @@ export const OAUTH_SCOPES_SUPPORTED = [
     'llm_skill:write',
     'logs:read',
     'logs:write',
+    'metrics:read',
+    'metrics:write',
     'notebook:read',
     'notebook:write',
     'organization:read',
